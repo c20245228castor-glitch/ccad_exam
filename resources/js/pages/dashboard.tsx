@@ -9,6 +9,7 @@ import {
     FileText,
     Settings,
     Droplets,
+    ShieldCheck,
 } from "lucide-react";
 
 type DashboardStats = {
@@ -92,8 +93,9 @@ export default function Dashboard({
                         </p>
                     </div>
 
-                    <div className="text-sm text-gray-600">
-                        Administrator
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                        <ShieldCheck size={16} className="text-cyan-600" />
+                        <span>Administrator</span>
                     </div>
                 </div>
 

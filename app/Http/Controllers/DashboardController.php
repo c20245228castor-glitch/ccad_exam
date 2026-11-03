@@ -52,7 +52,7 @@ class DashboardController extends Controller
             ->orderByDesc('billing_date')
             ->take(8)
             ->get()
-            ->map(function (WaterBill $bill) {
+            ->map(function (WaterBill $bill) use ($today) {
                 return [
                     'bill_id' => $bill->bill_id,
                     'consumer_name' => $bill->waterMeter?->consumer?->consumer_name ?? 'Unknown',
@@ -66,7 +66,7 @@ class DashboardController extends Controller
                     'due_date' => $bill->due_date?->toDateString(),
                     'is_overdue' => $bill->status === 'unpaid'
                         && $bill->due_date
-                        && $bill->due_date->isPast(),
+                        && $bill->due_date->toDateString() < $today,
                 ];
             });
 
