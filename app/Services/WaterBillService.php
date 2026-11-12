@@ -1,7 +1,9 @@
 <?php
-namespace  App\Services;
+
+namespace App\Services;
 
 use App\Models\WaterBill;
+use App\Models\WaterMeter;
 use App\Models\WaterRate;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -9,118 +11,119 @@ use Illuminate\Validation\ValidationException;
 
 class WaterBillService
 {
-    public function paginate(
-        ?string $search = null,
-        int $perPage = 10
-    ): LengthAwarePaginator {
+    private const PER_PAGE = 10;
+
+    public function paginate(?string $search = null, int $perPage = self::PER_PAGE): LengthAwarePaginator
+    {
         return WaterBill::query()
             ->with(['waterMeter.consumer', 'waterRate'])
-            ->when($search, function ($query, $search) {
-                $query->whereHas('waterMeter', function ($q) use ($search) {
-                    $q->where('meter_serial', 'like', "%{$search}%");
-                })->orWhere('status', 'like', "%{$search}%");
+            ->when($search, function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
+                    $q->whereHas('waterMeter', function ($meterQuery) use ($search) {
+                        $meterQuery->where('meter_serial', 'like', "%{$search}%")
+                            ->orWhereHas('consumer', function ($consumerQuery) use ($search) {
+                                $consumerQuery->where('consumer_name', 'like', "%{$search}%")
+                                    ->orWhere('account_number', 'like', "%{$search}%");
+                            });
+                    })->orWhere('status', 'like', "%{$search}%");
+                });
             })
+            ->latest('billing_date')
             ->paginate($perPage)
             ->withQueryString();
     }
 
-    public function sanitizeData(array $data): array
-    {
-        foreach (['billing_date', 'due_date'] as $field) {
-            if (isset($data[$field])) {
-                $data[$field] = trim(strip_tags($data[$field]));
-            }
-        }
-
-        return $data;
-    }
-
+    /**
+     * Calculate and return bill values. A late fee is intentionally not
+     * charged here: it is assessed when payment is recorded, based on the
+     * actual payment date.
+     */
     private function calculate(array $data): array
     {
         if ((float) $data['current_reading'] < (float) $data['previous_reading']) {
             throw ValidationException::withMessages([
-                'current_reading' => 'Current reading cannot be less than previous reading.',
+                'current_reading' => 'The current reading cannot be less than the previous reading.',
             ]);
         }
 
-        $rate = WaterRate::findOrFail($data['rate_id']);
+        $meter = WaterMeter::query()->findOrFail($data['meter_id']);
 
-        $consumption = (float) $data['current_reading']
-            - (float) $data['previous_reading'];
+        if (! $meter->is_active) {
+            throw ValidationException::withMessages([
+                'meter_id' => 'You cannot create a bill for an inactive meter.',
+            ]);
+        }
 
-        $waterCharge = round(
-            $consumption * (float) $rate->rate_per_cu_m,
+        $rate = WaterRate::query()->findOrFail($data['rate_id']);
+        $billingDate = $data['billing_date'];
+
+        if (
+            $rate->effective_from->toDateString() > $billingDate ||
+            ($rate->effective_to && $rate->effective_to->toDateString() < $billingDate)
+        ) {
+            throw ValidationException::withMessages([
+                'rate_id' => 'The selected water rate is not effective on the billing date.',
+            ]);
+        }
+
+        $consumption = round(
+            (float) $data['current_reading'] - (float) $data['previous_reading'],
             2
         );
 
-        $penalty = 0;
-
-        // Example policy: 5% penalty on overdue unpaid bills.
-        if (
-            $data['status'] === 'unpaid'
-            && $data['due_date'] < now()->toDateString()
-        ) {
-            $penalty = round($waterCharge * 0.05, 2);
-        }
+        $waterCharge = round($consumption * (float) $rate->rate_per_cu_m, 2);
 
         $data['consumption_cu_m'] = $consumption;
-        $data['penalty_fee'] = $penalty;
-        $data['total_water_bill'] = $waterCharge + $penalty;
+        $data['penalty_fee'] = 0;
+        $data['total_water_bill'] = $waterCharge;
+        $data['status'] = 'unpaid';
 
         return $data;
     }
 
     public function create(array $data): WaterBill
     {
-        $data = $this->sanitizeData($data);
+        $data = $this->calculate($data);
 
-        return DB::transaction(function () use ($data) {
-            $data['status'] = 'unpaid';
-            $data = $this->calculate($data);
-
-            return WaterBill::create($data);
-        });
+        return WaterBill::create($data);
     }
 
     public function update(WaterBill $waterBill, array $data): WaterBill
     {
-        $data = $this->sanitizeData($data);
-
         return DB::transaction(function () use ($waterBill, $data) {
-            if ($waterBill->payments()->exists()) {
-                throw new \RuntimeException(
-                    'Cannot edit a bill with payment records.'
-                );
+            $lockedBill = WaterBill::query()
+                ->whereKey($waterBill->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedBill->payments()->exists()) {
+                throw ValidationException::withMessages([
+                    'bill' => 'A bill with an existing payment cannot be edited.',
+                ]);
             }
 
-            $data = array_merge([
-                'meter_id' => $waterBill->meter_id,
-                'rate_id' => $waterBill->rate_id,
-                'previous_reading' => $waterBill->previous_reading,
-                'current_reading' => $waterBill->current_reading,
-                'billing_date' => $waterBill->billing_date->toDateString(),
-                'due_date' => $waterBill->due_date->toDateString(),
-                'status' => $waterBill->status,
-            ], $data);
+            $calculated = $this->calculate($data);
+            $lockedBill->update($calculated);
 
-            $data = $this->calculate($data);
-
-            $waterBill->update($data);
-
-            return $waterBill->refresh();
+            return $lockedBill->refresh();
         });
     }
 
     public function delete(WaterBill $waterBill): bool
     {
-        if ($waterBill->payments()->exists()) {
-            throw new \RuntimeException(
-                'Cannot delete a bill with payment records.'
-            );
-        }
+        return DB::transaction(function () use ($waterBill) {
+            $lockedBill = WaterBill::query()
+                ->whereKey($waterBill->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return DB::transaction(
-            fn () => (bool) $waterBill->delete()
-        );
+            if ($lockedBill->payments()->exists()) {
+                throw ValidationException::withMessages([
+                    'bill' => 'A bill with payment records cannot be deleted.',
+                ]);
+            }
+
+            return (bool) $lockedBill->delete();
+        });
     }
 }

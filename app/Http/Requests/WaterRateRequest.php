@@ -13,25 +13,18 @@ class WaterRateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'rate_per_cu_m' => trim(
-                (string) $this->input('rate_per_cu_m', '')
-            ),
-        ]);
+        if (is_string($this->input('rate_per_cu_m'))) {
+            $this->merge([
+                'rate_per_cu_m' => trim($this->input('rate_per_cu_m')),
+            ]);
+        }
     }
 
     public function rules(): array
     {
         return [
-            'rate_per_cu_m' => [
-                'required',
-                'numeric',
-                'min:0',
-            ],
-            'effective_from' => [
-                'required',
-                'date',
-            ],
+            'rate_per_cu_m' => ['required', 'numeric', 'min:0.01'],
+            'effective_from' => ['required', 'date'],
             'effective_to' => [
                 'nullable',
                 'date',
@@ -45,11 +38,11 @@ class WaterRateRequest extends FormRequest
         return [
             'rate_per_cu_m.required' => 'The water rate is required.',
             'rate_per_cu_m.numeric' => 'The water rate must be a valid number.',
-            'rate_per_cu_m.min' => 'The water rate cannot be less than 0.',
-            'effective_from.required' => 'The effective from date is required.',
-            'effective_from.date' => 'The effective from date must be a valid date.',
-            'effective_to.date' => 'The effective to date must be a valid date.',
-            'effective_to.after_or_equal' => 'The effective to date must be on or after the effective from date.',
+            'rate_per_cu_m.min' => 'The water rate must be greater than zero.',
+            'effective_from.required' => 'The starting date is required.',
+            'effective_from.date' => 'Please enter a valid starting date.',
+            'effective_to.date' => 'Please enter a valid ending date.',
+            'effective_to.after_or_equal' => 'The ending date must be on or after the starting date.',
         ];
     }
 }

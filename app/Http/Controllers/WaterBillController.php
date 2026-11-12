@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\WaterBillRequest;
 use App\Models\WaterBill;
+use App\Models\WaterMeter;
+use App\Models\WaterRate;
 use App\Services\WaterBillService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -15,83 +18,61 @@ class WaterBillController extends Controller
         private readonly WaterBillService $waterBillService
     ) {}
 
-    public function index(Request $req): Response
+    public function index(Request $request): Response
     {
-        $search = $req->input('search');
-
-        $stats = [
-            'total' => WaterBill::query()->count(),
-            'paid' => WaterBill::query()->where('status', 'paid')->count(),
-            'unpaid' => WaterBill::query()->where('status', 'unpaid')->count(),
-            'overdue' => WaterBill::query()
-                ->where('status', 'unpaid')
-                ->whereDate('due_date', '<', now()->toDateString())
-                ->count(),
-        ];
+        $search = $request->string('search')->toString();
+        $today = today()->toDateString();
 
         return Inertia::render('water-bill/index', [
-            'bills' => $this->waterBillService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
+            'bills' => $this->waterBillService->paginate($search ?: null),
+            'stats' => [
+                'total' => WaterBill::query()->count(),
+                'paid' => WaterBill::query()->where('status', 'paid')->count(),
+                'unpaid' => WaterBill::query()->where('status', 'unpaid')->count(),
+                'overdue' => WaterBill::query()
+                    ->where('status', 'unpaid')
+                    ->whereDate('due_date', '<', $today)
+                    ->count(),
             ],
-        ]);
-    }
-
-    public function create(): Response
-    {
-        return Inertia::render('water-bill/index', [
-            'waterBills' => $this->waterBillService->paginate(10),
-            'filter' => [
-                'search' => '',
-            ],
-            'meters' => \App\Models\WaterMeter::query()
+            'meters' => WaterMeter::query()
                 ->with('consumer')
+                ->where('is_active', true)
                 ->orderBy('meter_serial')
                 ->get(),
-            'rates' => \App\Models\WaterRate::query()
-                ->orderBy('effective_from', 'desc')
+            'rates' => WaterRate::query()
+                ->orderByDesc('effective_from')
                 ->get(),
+            'filter' => ['search' => $search],
         ]);
     }
 
-    public function store(WaterBillRequest $request)
+    public function store(WaterBillRequest $request): RedirectResponse
     {
         $this->waterBillService->create($request->validated());
 
         return back()->with('success', 'Water bill created successfully.');
     }
 
-    public function show(int $id)
+    public function show(WaterBill $waterBill)
     {
         return response()->json(
-            WaterBill::with([
+            $waterBill->load([
                 'waterMeter.consumer',
                 'waterRate',
                 'payments',
-            ])->findOrFail($id)
+            ])
         );
     }
 
-    public function update(WaterBillRequest $request, int $id)
+    public function update(WaterBillRequest $request, WaterBill $waterBill): RedirectResponse
     {
-        $waterBill = WaterBill::findOrFail($id);
-
-        $this->waterBillService->update(
-            $waterBill,
-            $request->validated()
-        );
+        $this->waterBillService->update($waterBill, $request->validated());
 
         return back()->with('success', 'Water bill updated successfully.');
     }
 
-    public function destroy(int $id)
+    public function destroy(WaterBill $waterBill): RedirectResponse
     {
-        $waterBill = WaterBill::findOrFail($id);
-
         $this->waterBillService->delete($waterBill);
 
         return back()->with('success', 'Water bill deleted successfully.');

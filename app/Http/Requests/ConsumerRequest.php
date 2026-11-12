@@ -14,40 +14,33 @@ class ConsumerRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'account_number' => trim((string) $this->input('account_number', '')),
-            'consumer_name' => trim((string) $this->input('consumer_name', '')),
-            'consumer_address' => trim((string) $this->input('consumer_address', '')),
-        ]);
+        $fields = ['account_number', 'consumer_name', 'consumer_address'];
+        $normalized = [];
+
+        foreach ($fields as $field) {
+            if (is_string($this->input($field))) {
+                $normalized[$field] = trim(preg_replace('/\s+/u', ' ', $this->input($field)));
+            }
+        }
+
+        $this->merge($normalized);
     }
 
     public function rules(): array
     {
-        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
-        $accountNumberRules = [
-            $isUpdate ? 'sometimes' : 'required',
-            'string',
-            'max:255',
-        ];
-
-        $uniqueAccountNumber = Rule::unique('consumers', 'account_number');
-        if ($isUpdate) {
-            $uniqueAccountNumber->ignore($this->route('id'), 'consumer_id');
-        }
-        $accountNumberRules[] = $uniqueAccountNumber;
+        $consumer = $this->route('consumer');
+        $ignoreId = is_object($consumer) ? $consumer->getKey() : $consumer;
 
         return [
-            'account_number' => $accountNumberRules,
-            'consumer_name' => [
-                $isUpdate ? 'sometimes' : 'required',
+            'account_number' => [
+                'required',
                 'string',
-                'max:255',
+                'max:50',
+                Rule::unique('consumers', 'account_number')
+                    ->ignore($ignoreId, 'consumer_id'),
             ],
-            'consumer_address' => [
-                $isUpdate ? 'sometimes' : 'required',
-                'string',
-                'max:255',
-            ],
+            'consumer_name' => ['required', 'string', 'max:255'],
+            'consumer_address' => ['required', 'string', 'max:255'],
         ];
     }
 
@@ -55,15 +48,9 @@ class ConsumerRequest extends FormRequest
     {
         return [
             'account_number.required' => 'The account number is required.',
-            'account_number.string' => 'The account number must be a valid string.',
-            'account_number.max' => 'The account number may not exceed 255 characters.',
-            'account_number.unique' => 'This account number has already been taken.',
+            'account_number.unique' => 'This account number is already registered.',
             'consumer_name.required' => 'The consumer name is required.',
-            'consumer_name.string' => 'The consumer name must be a valid string.',
-            'consumer_name.max' => 'The consumer name may not exceed 255 characters.',
             'consumer_address.required' => 'The consumer address is required.',
-            'consumer_address.string' => 'The consumer address must be a valid string.',
-            'consumer_address.max' => 'The consumer address may not exceed 255 characters.',
         ];
     }
 }
