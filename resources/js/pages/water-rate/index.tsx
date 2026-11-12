@@ -24,7 +24,6 @@ export default function WaterRateIndex({ waterRates, stats, filter }: { waterRat
     };
     const submit = (event: FormEvent) => {
         event.preventDefault();
-        const data = { ...form.data, effective_to: form.data.effective_to || null };
         const options = { onSuccess: () => { setDialogOpen(false); form.reset(); } };
         if (editingId) form.put(`/water-rates/${editingId}`, options);
         else form.post('/water-rates', options);
