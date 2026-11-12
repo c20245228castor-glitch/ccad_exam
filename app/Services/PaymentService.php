@@ -1,69 +1,101 @@
 <?php
+
 namespace App\Services;
 
 use App\Models\Payment;
 use App\Models\WaterBill;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PaymentService
 {
-    public function paginate(
-        ?string $search = null,
-        int $perPage = 10
-    ): LengthAwarePaginator {
+    private const LATE_PENALTY_RATE = 0.05;
+
+    public function paginate(?string $search = null, int $perPage = 10): LengthAwarePaginator
+    {
         return Payment::query()
-            ->with('waterBill')
-            ->when($search, function ($query, $search) {
-                $query->where('payment_reference', 'like', "%{$search}%");
+            ->with('waterBill.waterMeter.consumer')
+            ->when($search, function ($query) use ($search) {
+                $query->where('payment_reference', 'like', "%{$search}%")
+                    ->orWhereHas('waterBill', function ($billQuery) use ($search) {
+                        $billQuery->where('bill_id', 'like', "%{$search}%");
+                    });
             })
+            ->latest('payment_date')
             ->paginate($perPage)
             ->withQueryString();
     }
 
-    public function sanitizeData(array $data): array
-    {
-        if (isset($data['payment_reference'])) {
-            $data['payment_reference'] = trim(
-                strip_tags($data['payment_reference'])
-            );
-        }
-
-        return $data;
-    }
-
     public function create(array $data): Payment
     {
-        $data = $this->sanitizeData($data);
-
         return DB::transaction(function () use ($data) {
-            $bill = WaterBill::where('bill_id', $data['bill_id'])
+            // Lock the bill so two simultaneous requests cannot pay it twice.
+            $bill = WaterBill::query()
+                ->where('bill_id', $data['bill_id'])
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($bill->status === 'paid') {
+            if ($bill->status === 'paid' || $bill->payments()->exists()) {
                 throw ValidationException::withMessages([
                     'bill_id' => 'This bill has already been paid.',
                 ]);
             }
 
-            if ((float) $data['amount_paid'] < (float) $bill->total_water_bill) {
+            $paymentDate = Carbon::parse($data['payment_date'])->startOfDay();
+            $billingDate = $bill->billing_date->copy()->startOfDay();
+
+            if ($paymentDate->lt($billingDate)) {
                 throw ValidationException::withMessages([
-                    'amount_paid' => 'Payment must cover the full bill amount.',
+                    'payment_date' => 'The payment date cannot be before the billing date.',
                 ]);
             }
 
-            $payment = Payment::create($data);
+            $waterCharge = round(
+                (float) $bill->consumption_cu_m * (float) $bill->waterRate()->value('rate_per_cu_m'),
+                2
+            );
 
-            $bill->update(['status' => 'paid']);
+            $isLate = $paymentDate->toDateString() > $bill->due_date->toDateString();
+            $penalty = $isLate
+                ? round($waterCharge * self::LATE_PENALTY_RATE, 2)
+                : 0.00;
 
-            return $payment;
+            $amountDue = round($waterCharge + $penalty, 2);
+            $amountPaid = round((float) $data['amount_paid'], 2);
+
+            // This application uses full payment only. Reject both underpayment
+            // and overpayment so the bill balance is never ambiguous.
+            if (abs($amountPaid - $amountDue) > 0.009) {
+                throw ValidationException::withMessages([
+                    'amount_paid' => sprintf(
+                        'The exact amount due is %.2f%s.',
+                        $amountDue,
+                        $isLate ? ' (includes a 5% late penalty)' : ''
+                    ),
+                ]);
+            }
+
+            $payment = Payment::create([
+                'bill_id' => $bill->bill_id,
+                'amount_paid' => $amountPaid,
+                'payment_date' => $data['payment_date'],
+                'payment_reference' => $data['payment_reference'],
+            ]);
+
+            $bill->update([
+                'penalty_fee' => $penalty,
+                'total_water_bill' => $amountDue,
+                'status' => 'paid',
+            ]);
+
+            return $payment->load('waterBill');
         });
     }
 
     public function getById(Payment $payment): Payment
     {
-        return $payment->load('waterBill');
+        return $payment->load('waterBill.waterMeter.consumer');
     }
 }

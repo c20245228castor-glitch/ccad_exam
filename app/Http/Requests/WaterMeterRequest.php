@@ -14,20 +14,22 @@ class WaterMeterRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'meter_serial' => strtoupper(
-                trim((string) $this->input('meter_serial', ''))
-            ),
-        ]);
+        if (is_string($this->input('meter_serial'))) {
+            $this->merge([
+                'meter_serial' => strtoupper(trim($this->input('meter_serial'))),
+            ]);
+        }
     }
 
     public function rules(): array
     {
-        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+        $meter = $this->route('water_meter');
+        $ignoreId = is_object($meter) ? $meter->getKey() : $meter;
 
         return [
             'consumer_id' => [
                 'required',
+                'integer',
                 'exists:consumers,consumer_id',
             ],
             'meter_serial' => [
@@ -36,27 +38,21 @@ class WaterMeterRequest extends FormRequest
                 'min:3',
                 'max:50',
                 Rule::unique('water_meters', 'meter_serial')
-                    ->ignore($isUpdate ? $this->route('id') : null, 'meter_id'),
+                    ->ignore($ignoreId, 'meter_id'),
             ],
-            'is_active' => [
-                'required',
-                'boolean',
-            ],
+            'is_active' => ['required', 'boolean'],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'consumer_id.required' => 'The consumer is required.',
+            'consumer_id.required' => 'Please select a consumer.',
             'consumer_id.exists' => 'The selected consumer does not exist.',
             'meter_serial.required' => 'The meter serial number is required.',
-            'meter_serial.string' => 'The meter serial number must be a valid string.',
-            'meter_serial.min' => 'The meter serial number must be at least 3 characters long.',
-            'meter_serial.max' => 'The meter serial number may not exceed 50 characters.',
-            'meter_serial.unique' => 'This meter serial number has already been used.',
-            'is_active.required' => 'The active status is required.',
-            'is_active.boolean' => 'The active status must be true or false.',
+            'meter_serial.unique' => 'This meter serial number is already registered.',
+            'is_active.required' => 'Please select the meter status.',
+            'is_active.boolean' => 'The meter status must be active or inactive.',
         ];
     }
 }

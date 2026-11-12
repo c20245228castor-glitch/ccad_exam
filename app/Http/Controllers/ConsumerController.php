@@ -1,11 +1,11 @@
 <?php
 
-namespace   App\Http\Controllers;
+namespace App\Http\Controllers;
 
 use App\Http\Requests\ConsumerRequest;
 use App\Models\Consumer;
-use App\Models\WaterMeter;
 use App\Services\ConsumerService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -16,59 +16,44 @@ class ConsumerController extends Controller
         private readonly ConsumerService $consumerService
     ) {}
 
-    public function index(Request $req): Response
+    public function index(Request $request): Response
     {
-        $search = $req->input('search');
-
-        $stats = [
-            'total' => Consumer::query()->count(),
-            'with_meters' => Consumer::query()->has('waterMeters')->count(),
-            'without_meters' => Consumer::query()->doesntHave('waterMeters')->count(),
-            'active_meters' => WaterMeter::query()->where('is_active', true)->count(),
-        ];
+        $search = $request->string('search')->toString();
 
         return Inertia::render('consumer/index', [
-            'consumers' => $this->consumerService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
+            'consumers' => $this->consumerService->paginate($search ?: null),
+            'stats' => [
+                'total' => Consumer::query()->count(),
+                'with_meters' => Consumer::query()->has('waterMeters')->count(),
+                'without_meters' => Consumer::query()->doesntHave('waterMeters')->count(),
             ],
+            'filter' => ['search' => $search],
         ]);
     }
 
-    public function store(ConsumerRequest $request)
+    public function store(ConsumerRequest $request): RedirectResponse
     {
         $this->consumerService->create($request->validated());
 
         return back()->with('success', 'Consumer created successfully.');
     }
 
-    public function show(int $id)
+    public function show(Consumer $consumer)
     {
         return response()->json(
-            \App\Models\Consumer::with('waterMeters')->findOrFail($id)
+            $consumer->load('waterMeters.waterBills')
         );
     }
 
-    public function update(ConsumerRequest $request, int $id)
+    public function update(ConsumerRequest $request, Consumer $consumer): RedirectResponse
     {
-        $consumer = \App\Models\Consumer::findOrFail($id);
-
-        $this->consumerService->update(
-            $consumer,
-            $request->validated()
-        );
+        $this->consumerService->update($consumer, $request->validated());
 
         return back()->with('success', 'Consumer updated successfully.');
     }
 
-    public function destroy(int $id)
+    public function destroy(Consumer $consumer): RedirectResponse
     {
-        $consumer = \App\Models\Consumer::findOrFail($id);
-
         $this->consumerService->delete($consumer);
 
         return back()->with('success', 'Consumer deleted successfully.');
