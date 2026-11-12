@@ -29,15 +29,11 @@ class WaterMeterService
 
     public function create(array $data): WaterMeter
     {
-        $data['meter_serial'] = strtoupper(trim($data['meter_serial']));
-
         return WaterMeter::create($data);
     }
 
     public function update(WaterMeter $waterMeter, array $data): WaterMeter
     {
-        $data['meter_serial'] = strtoupper(trim($data['meter_serial']));
-
         return DB::transaction(function () use ($waterMeter, $data) {
             $lockedMeter = WaterMeter::query()
                 ->whereKey($waterMeter->getKey())

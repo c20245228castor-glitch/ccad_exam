@@ -38,7 +38,7 @@ class WaterBillService
      * charged here: it is assessed when payment is recorded, based on the
      * actual payment date.
      */
-    private function calculate(array $data): array
+    private function calculate(array $data, bool $allowInactiveMeter = false): array
     {
         if ((float) $data['current_reading'] < (float) $data['previous_reading']) {
             throw ValidationException::withMessages([
@@ -48,7 +48,7 @@ class WaterBillService
 
         $meter = WaterMeter::query()->findOrFail($data['meter_id']);
 
-        if (! $meter->is_active) {
+        if (! $meter->is_active && ! $allowInactiveMeter) {
             throw ValidationException::withMessages([
                 'meter_id' => 'You cannot create a bill for an inactive meter.',
             ]);
@@ -102,7 +102,8 @@ class WaterBillService
                 ]);
             }
 
-            $calculated = $this->calculate($data);
+            $allowInactiveMeter = (int) $data['meter_id'] === (int) $lockedBill->meter_id;
+            $calculated = $this->calculate($data, $allowInactiveMeter);
             $lockedBill->update($calculated);
 
             return $lockedBill->refresh();
