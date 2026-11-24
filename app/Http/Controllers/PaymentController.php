@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\PaymentRequest;
-use App\Models\Payment;
 use App\Services\PaymentService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -19,23 +18,10 @@ class PaymentController extends Controller
     {
         $search = $req->input('search');
 
-        $stats = [
-            'total' => Payment::query()->count(),
-            'amount_paid' => Payment::query()->sum('amount_paid'),
-            'unique_bills' => Payment::query()->distinct('bill_id')->count('bill_id'),
-            'recent' => Payment::query()->whereDate('payment_date', now()->toDateString())->count(),
-        ];
-
-        return Inertia::render('payment/index', [
-            'payments' => $this->paymentService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
-            ],
-        ]);
+        return Inertia::render(
+            'payment/index',
+            $this->paymentService->indexData(is_string($search) ? $search : null)
+        );
     }
 
     public function store(PaymentRequest $request)
@@ -48,7 +34,23 @@ class PaymentController extends Controller
     public function show(int $id)
     {
         return response()->json(
-            Payment::with('waterBill')->findOrFail($id)
+            $this->paymentService->findOrFail($id)
         );
+    }
+
+    public function update(PaymentRequest $request, int $id)
+    {
+        $payment = $this->paymentService->findOrFail($id);
+
+        $this->paymentService->update($payment, $request->validated());
+
+        return back()->with('success', 'Payment updated successfully.');
+    }
+
+    public function destroy(int $id)
+    {
+        $this->paymentService->delete($this->paymentService->findOrFail($id));
+
+        return back()->with('success', 'Payment deleted successfully.');
     }
 }

@@ -8,16 +8,7 @@ class WaterRateRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
-    }
-
-    protected function prepareForValidation(): void
-    {
-        $this->merge([
-            'rate_per_cu_m' => trim(
-                (string) $this->input('rate_per_cu_m', '')
-            ),
-        ]);
+        return $this->user() !== null;
     }
 
     public function rules(): array
@@ -35,7 +26,6 @@ class WaterRateRequest extends FormRequest
             'effective_to' => [
                 'nullable',
                 'date',
-                'after_or_equal:effective_from',
             ],
         ];
     }
@@ -49,7 +39,6 @@ class WaterRateRequest extends FormRequest
             'effective_from.required' => 'The effective from date is required.',
             'effective_from.date' => 'The effective from date must be a valid date.',
             'effective_to.date' => 'The effective to date must be a valid date.',
-            'effective_to.after_or_equal' => 'The effective to date must be on or after the effective from date.',
         ];
     }
 }

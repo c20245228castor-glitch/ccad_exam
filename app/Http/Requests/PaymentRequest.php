@@ -3,21 +3,12 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class PaymentRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
-    }
-
-    protected function prepareForValidation(): void
-    {
-        $this->merge([
-            'payment_reference' => trim((string) $this->input('payment_reference', '')),
-            'amount_paid' => trim((string) $this->input('amount_paid', '')),
-        ]);
+        return $this->user() !== null;
     }
 
     public function rules(): array
@@ -35,13 +26,7 @@ class PaymentRequest extends FormRequest
             ],
             'payment_date' => [
                 'required',
-                'date',
-            ],
-            'payment_reference' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('payments', 'payment_reference'),
+                'date_format:Y-m-d\TH:i',
             ],
         ];
     }
@@ -56,11 +41,7 @@ class PaymentRequest extends FormRequest
             'amount_paid.numeric' => 'The payment amount must be a valid number.',
             'amount_paid.min' => 'The payment amount cannot be less than 0.',
             'payment_date.required' => 'The payment date is required.',
-            'payment_date.date' => 'The payment date must be a valid date.',
-            'payment_reference.required' => 'The payment reference is required.',
-            'payment_reference.string' => 'The payment reference must be a valid string.',
-            'payment_reference.max' => 'The payment reference may not exceed 255 characters.',
-            'payment_reference.unique' => 'This payment reference already exists.',
+            'payment_date.date_format' => 'Enter a valid payment date and time.',
         ];
     }
 }

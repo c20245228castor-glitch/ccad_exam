@@ -1,10 +1,8 @@
 <?php
 
-namespace   App\Http\Controllers;
+namespace App\Http\Controllers;
 
 use App\Http\Requests\ConsumerRequest;
-use App\Models\Consumer;
-use App\Models\WaterMeter;
 use App\Services\ConsumerService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -20,23 +18,10 @@ class ConsumerController extends Controller
     {
         $search = $req->input('search');
 
-        $stats = [
-            'total' => Consumer::query()->count(),
-            'with_meters' => Consumer::query()->has('waterMeters')->count(),
-            'without_meters' => Consumer::query()->doesntHave('waterMeters')->count(),
-            'active_meters' => WaterMeter::query()->where('is_active', true)->count(),
-        ];
-
-        return Inertia::render('consumer/index', [
-            'consumers' => $this->consumerService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
-            ],
-        ]);
+        return Inertia::render(
+            'consumer/index',
+            $this->consumerService->indexData(is_string($search) ? $search : null)
+        );
     }
 
     public function store(ConsumerRequest $request)
@@ -49,13 +34,13 @@ class ConsumerController extends Controller
     public function show(int $id)
     {
         return response()->json(
-            \App\Models\Consumer::with('waterMeters')->findOrFail($id)
+            $this->consumerService->findOrFail($id)
         );
     }
 
     public function update(ConsumerRequest $request, int $id)
     {
-        $consumer = \App\Models\Consumer::findOrFail($id);
+        $consumer = $this->consumerService->findOrFail($id);
 
         $this->consumerService->update(
             $consumer,
@@ -67,7 +52,7 @@ class ConsumerController extends Controller
 
     public function destroy(int $id)
     {
-        $consumer = \App\Models\Consumer::findOrFail($id);
+        $consumer = $this->consumerService->findOrFail($id);
 
         $this->consumerService->delete($consumer);
 

@@ -3,11 +3,33 @@
 namespace App\Services;
 
 use App\Models\Consumer;
+use App\Models\WaterMeter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class ConsumerService
 {
+    public function indexData(?string $search = null): array
+    {
+        return [
+            'consumers' => $this->paginate($search, 10),
+            'stats' => [
+                'total' => Consumer::query()->count(),
+                'with_meters' => Consumer::query()->has('waterMeters')->count(),
+                'without_meters' => Consumer::query()->doesntHave('waterMeters')->count(),
+                'active_meters' => WaterMeter::query()->where('is_active', true)->count(),
+            ],
+            'filter' => ['search' => $search ?? ''],
+        ];
+    }
+
+    public function findOrFail(int $id): Consumer
+    {
+        return Consumer::with('waterMeters')->findOrFail($id);
+    }
+
     public function paginate(
         ?string $search = null,
         int $perPage = 10
@@ -16,7 +38,7 @@ class ConsumerService
             ->when($search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('consumer_name', 'like', "%{$search}%")
-                      ->orWhere('account_number', 'like', "%{$search}%");
+                        ->orWhere('account_number', 'like', "%{$search}%");
                 });
             })
             ->paginate($perPage)
@@ -25,7 +47,7 @@ class ConsumerService
 
     public function sanitizeData(array $data): array
     {
-        foreach (['consumer_name', 'consumer_address', 'account_number'] as $field) {
+        foreach (['consumer_name', 'consumer_address'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = trim(
                     preg_replace('/\s+/u', ' ', strip_tags($data[$field]))
@@ -38,16 +60,32 @@ class ConsumerService
 
     public function create(array $data): Consumer
     {
+        unset($data['account_number']);
         $data = $this->sanitizeData($data);
+        $this->validateCleanedData($data);
 
-        return DB::transaction(
-            fn () => Consumer::create($data)
-        );
+        return DB::transaction(function () use ($data) {
+            $consumer = Consumer::create([
+                ...$data,
+                'account_number' => 'PENDING-'.Str::ulid(),
+            ]);
+
+            $number = 1000 + (int) $consumer->getKey();
+            do {
+                $accountNumber = 'ACC-'.str_pad((string) $number++, 4, '0', STR_PAD_LEFT);
+            } while (Consumer::query()->where('account_number', $accountNumber)->exists());
+
+            $consumer->update(['account_number' => $accountNumber]);
+
+            return $consumer->refresh();
+        });
     }
 
     public function update(Consumer $consumer, array $data): Consumer
     {
+        unset($data['account_number']);
         $data = $this->sanitizeData($data);
+        $this->validateCleanedData($data);
 
         return DB::transaction(function () use ($consumer, $data) {
             $consumer->update($data);
@@ -58,14 +96,32 @@ class ConsumerService
 
     public function delete(Consumer $consumer): bool
     {
-        if ($consumer->waterMeters()->exists()) {
-            throw new \RuntimeException(
-                'Cannot delete a consumer with existing water meters.'
-            );
-        }
+        return DB::transaction(function () use ($consumer) {
+            $consumer = Consumer::query()
+                ->whereKey($consumer->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return DB::transaction(
-            fn () => (bool) $consumer->delete()
-        );
+            if ($consumer->waterMeters()->exists()) {
+                throw ValidationException::withMessages([
+                    'record' => 'Cannot delete a consumer with existing water meters.',
+                ]);
+            }
+
+            return (bool) $consumer->delete();
+        });
+    }
+
+    private function validateCleanedData(array $data): void
+    {
+        foreach (['consumer_name', 'consumer_address'] as $field) {
+            if (array_key_exists($field, $data) && $data[$field] === '') {
+                throw ValidationException::withMessages([
+                    $field => $field === 'consumer_name'
+                        ? 'The consumer name is required.'
+                        : 'The consumer address is required.',
+                ]);
+            }
+        }
     }
 }

@@ -1,9 +1,8 @@
 <?php
 
-namespace  App\Http\Controllers;
+namespace App\Http\Controllers;
 
 use App\Http\Requests\WaterRateRequest;
-use App\Models\WaterRate;
 use App\Services\WaterRateService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -19,43 +18,10 @@ class WaterRateController extends Controller
     {
         $search = $req->input('search');
 
-        $stats = [
-            'total' => WaterRate::query()->count(),
-            'active' => WaterRate::query()
-                ->where(function ($query) {
-                    $query->whereNull('effective_to')
-                        ->orWhere('effective_to', '>=', now()->toDateString());
-                })
-                ->count(),
-            'expired' => WaterRate::query()
-                ->whereNotNull('effective_to')
-                ->where('effective_to', '<', now()->toDateString())
-                ->count(),
-        ];
-
-        return Inertia::render('water-rate/index', [
-            'waterRates' => $this->waterRateService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
-            ],
-        ]);
-    }
-
-    public function create(): Response
-    {
-        return Inertia::render('water-rate/index', [
-            'waterRates' => $this->waterRateService->paginate(10),
-            'filter' => [
-                'search' => '',
-            ],
-            'rateOptions' => WaterRate::query()
-                ->orderBy('effective_from', 'desc')
-                ->get(),
-        ]);
+        return Inertia::render(
+            'water-rate/index',
+            $this->waterRateService->indexData(is_string($search) ? $search : null)
+        );
     }
 
     public function store(WaterRateRequest $request)

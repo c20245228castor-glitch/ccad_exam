@@ -1,8 +1,8 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Http\Requests\WaterMeterRequest;
-use App\Models\WaterMeter;
 use App\Services\WaterMeterService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -18,23 +18,10 @@ class WaterMeterController extends Controller
     {
         $search = $req->input('search');
 
-        $stats = [
-            'total' => WaterMeter::query()->count(),
-            'active' => WaterMeter::query()->where('is_active', true)->count(),
-            'inactive' => WaterMeter::query()->where('is_active', false)->count(),
-            'assigned' => WaterMeter::query()->whereNotNull('consumer_id')->count(),
-        ];
-
-        return Inertia::render('water-meter/index', [
-            'waterMeters' => $this->waterMeterService->paginate(
-                is_string($search) ? $search : null,
-                10
-            ),
-            'stats' => $stats,
-            'filter' => [
-                'search' => is_string($search) ? $search : '',
-            ],
-        ]);
+        return Inertia::render(
+            'water-meter/index',
+            $this->waterMeterService->indexData(is_string($search) ? $search : null)
+        );
     }
 
     public function store(WaterMeterRequest $request)
@@ -47,13 +34,13 @@ class WaterMeterController extends Controller
     public function show(int $id)
     {
         return response()->json(
-            WaterMeter::with(['consumer', 'waterBills'])->findOrFail($id)
+            $this->waterMeterService->findOrFail($id)
         );
     }
 
     public function update(WaterMeterRequest $request, int $id)
     {
-        $waterMeter = WaterMeter::findOrFail($id);
+        $waterMeter = $this->waterMeterService->findOrFail($id);
 
         $this->waterMeterService->update(
             $waterMeter,
@@ -65,7 +52,7 @@ class WaterMeterController extends Controller
 
     public function destroy(int $id)
     {
-        $waterMeter = WaterMeter::findOrFail($id);
+        $waterMeter = $this->waterMeterService->findOrFail($id);
 
         $this->waterMeterService->delete($waterMeter);
 

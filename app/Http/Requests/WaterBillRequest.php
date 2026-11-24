@@ -2,30 +2,15 @@
 
 namespace App\Http\Requests;
 
-use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class WaterBillRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return $this->user() !== null;
     }
 
-    // Sanitization
-    protected function prepareForValidation(): void
-    {
-        $this->merge([
-            'previous_reading' => trim(
-                (string) $this->input('previous_reading', '')
-            ),
-            'current_reading' => trim(
-                (string) $this->input('current_reading', '')
-            ),
-        ]);
-    }
-
-    // Validation
     public function rules(): array
     {
         return [
@@ -45,7 +30,6 @@ class WaterBillRequest extends FormRequest
             'current_reading' => [
                 'required',
                 'numeric',
-                'gte:previous_reading',
             ],
             'billing_date' => [
                 'required',
@@ -54,7 +38,6 @@ class WaterBillRequest extends FormRequest
             'due_date' => [
                 'required',
                 'date',
-                'after_or_equal:billing_date',
             ],
         ];
     }
@@ -71,12 +54,10 @@ class WaterBillRequest extends FormRequest
             'previous_reading.min' => 'The previous reading cannot be less than 0.',
             'current_reading.required' => 'The current reading is required.',
             'current_reading.numeric' => 'The current reading must be a valid number.',
-            'current_reading.gte' => 'The current reading cannot be less than the previous reading.',
             'billing_date.required' => 'The billing date is required.',
             'billing_date.date' => 'The billing date must be a valid date.',
             'due_date.required' => 'The due date is required.',
             'due_date.date' => 'The due date must be a valid date.',
-            'due_date.after_or_equal' => 'The due date must be on or after the billing date.',
         ];
     }
 }

@@ -2,18 +2,45 @@
 
 namespace App\Services;
 
+use App\Models\Consumer;
 use App\Models\WaterMeter;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class WaterMeterService
 {
+    public function indexData(?string $search = null): array
+    {
+        return [
+            'waterMeters' => $this->paginate($search, 10),
+            'stats' => [
+                'total' => WaterMeter::query()->count(),
+                'active' => WaterMeter::query()->where('is_active', true)->count(),
+                'inactive' => WaterMeter::query()->where('is_active', false)->count(),
+                'assigned' => WaterMeter::query()->whereNotNull('consumer_id')->count(),
+            ],
+            'consumers' => Consumer::query()
+                ->select(['consumer_id', 'consumer_name', 'account_number'])
+                ->orderBy('consumer_name')
+                ->get(),
+            'filter' => ['search' => $search ?? ''],
+        ];
+    }
+
+    public function findOrFail(int $id): WaterMeter
+    {
+        return WaterMeter::with(['consumer', 'waterBills'])->findOrFail($id);
+    }
+
     public function paginate(
         ?string $search = null,
         int $perPage = 10
     ): LengthAwarePaginator {
         return WaterMeter::query()
-            ->with('consumer')
+            ->select(['meter_id', 'consumer_id', 'meter_serial', 'is_active'])
+            ->with('consumer:consumer_id,consumer_name,account_number')
             ->when($search, function ($query, $search) {
                 $query->where('meter_serial', 'like', "%{$search}%")
                     ->orWhereHas('consumer', function ($q) use ($search) {
@@ -26,10 +53,8 @@ class WaterMeterService
 
     public function sanitizeData(array $data): array
     {
-        if (isset($data['meter_serial'])) {
-            $data['meter_serial'] = strtoupper(
-                trim(strip_tags($data['meter_serial']))
-            );
+        if (isset($data['consumer_id'])) {
+            $data['consumer_id'] = (int) $data['consumer_id'];
         }
 
         return $data;
@@ -37,15 +62,29 @@ class WaterMeterService
 
     public function create(array $data): WaterMeter
     {
+        unset($data['meter_serial']);
         $data = $this->sanitizeData($data);
 
-        return DB::transaction(
-            fn () => WaterMeter::create($data)
-        );
+        return DB::transaction(function () use ($data) {
+            $waterMeter = WaterMeter::create([
+                ...$data,
+                'meter_serial' => 'PENDING-'.Str::ulid(),
+            ]);
+
+            $number = 1000 + (int) $waterMeter->getKey();
+            do {
+                $meterSerial = 'WM-'.str_pad((string) $number++, 4, '0', STR_PAD_LEFT);
+            } while (WaterMeter::query()->where('meter_serial', $meterSerial)->exists());
+
+            $waterMeter->update(['meter_serial' => $meterSerial]);
+
+            return $waterMeter->refresh();
+        });
     }
 
     public function update(WaterMeter $waterMeter, array $data): WaterMeter
     {
+        unset($data['meter_serial']);
         $data = $this->sanitizeData($data);
 
         return DB::transaction(function () use ($waterMeter, $data) {
@@ -57,14 +96,19 @@ class WaterMeterService
 
     public function delete(WaterMeter $waterMeter): bool
     {
-        if ($waterMeter->waterBills()->exists()) {
-            throw new \RuntimeException(
-                'Cannot delete a meter with existing bills.'
-            );
-        }
+        return DB::transaction(function () use ($waterMeter) {
+            $waterMeter = WaterMeter::query()
+                ->whereKey($waterMeter->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return DB::transaction(
-            fn () => (bool) $waterMeter->delete()
-        );
+            if ($waterMeter->waterBills()->exists()) {
+                throw ValidationException::withMessages([
+                    'record' => 'Cannot delete a meter with existing bills.',
+                ]);
+            }
+
+            return (bool) $waterMeter->delete();
+        });
     }
 }

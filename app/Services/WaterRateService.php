@@ -4,11 +4,33 @@ namespace App\Services;
 
 use App\Models\WaterRate;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class WaterRateService
 {
+    public function indexData(?string $search = null): array
+    {
+        return [
+            'waterRates' => $this->paginate($search, 10),
+            'stats' => [
+                'total' => WaterRate::query()->count(),
+                'active' => WaterRate::query()
+                    ->where(function ($query) {
+                        $query->whereNull('effective_to')
+                            ->orWhere('effective_to', '>=', now()->toDateString());
+                    })
+                    ->count(),
+                'expired' => WaterRate::query()
+                    ->whereNotNull('effective_to')
+                    ->where('effective_to', '<', now()->toDateString())
+                    ->count(),
+            ],
+            'filter' => ['search' => $search ?? ''],
+        ];
+    }
+
     public function paginate(
         ?string $search = null,
         int $perPage = 10
@@ -43,13 +65,10 @@ class WaterRateService
             $value = preg_replace('/\s+/u', ' ', $value);
 
             if ($field === 'rate_per_cu_m') {
-                $normalized = preg_replace('/[^0-9.\-]/', '', $value);
-
-                if ($normalized === '' || $normalized === '-') {
-                    $normalized = '0';
+                if (is_numeric($value)) {
+                    $data[$field] = round((float) $value, 2);
                 }
 
-                $data[$field] = round((float) $normalized, 2);
                 continue;
             }
 
@@ -71,7 +90,7 @@ class WaterRateService
         $effectiveFrom = $data['effective_from'];
         $effectiveTo = $data['effective_to'];
 
-        if ($effectiveTo < $effectiveFrom) {
+        if (Carbon::parse($effectiveTo)->lt(Carbon::parse($effectiveFrom))) {
             throw ValidationException::withMessages([
                 'effective_to' => 'Effective to date cannot be earlier than effective from date.',
             ]);
@@ -134,14 +153,19 @@ class WaterRateService
 
     public function delete(WaterRate $waterRate): bool
     {
-        if ($waterRate->waterBills()->exists()) {
-            throw new \RuntimeException(
-                'Cannot delete a rate used by existing bills.'
-            );
-        }
+        return DB::transaction(function () use ($waterRate) {
+            $waterRate = WaterRate::query()
+                ->whereKey($waterRate->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return DB::transaction(
-            fn () => (bool) $waterRate->delete()
-        );
+            if ($waterRate->waterBills()->exists()) {
+                throw ValidationException::withMessages([
+                    'record' => 'Cannot delete a rate used by existing bills.',
+                ]);
+            }
+
+            return (bool) $waterRate->delete();
+        });
     }
 }

@@ -15,11 +15,21 @@ Route::get('/', function () {
 
 Route::middleware(['auth'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    Route::get('consumers', [ConsumerController::class, 'index'])->name('consumers.index');
-    Route::get('water-meters', [WaterMeterController::class, 'index'])->name('water-meters.index');
-    Route::get('water-bills', [WaterBillController::class, 'index'])->name('water-bills.index');
-    Route::get('water-rates', [WaterRateController::class, 'index'])->name('water-rates.index');
-    Route::get('payments', [PaymentController::class, 'index'])->name('payments.index');
+    Route::resource('consumers', ConsumerController::class)
+        ->parameters(['consumers' => 'id'])
+        ->except(['create', 'edit']);
+    Route::resource('water-meters', WaterMeterController::class)
+        ->parameters(['water-meters' => 'id'])
+        ->except(['create', 'edit']);
+    Route::resource('water-bills', WaterBillController::class)
+        ->parameters(['water-bills' => 'id'])
+        ->except(['create', 'edit']);
+    Route::resource('water-rates', WaterRateController::class)
+        ->parameters(['water-rates' => 'id'])
+        ->except(['create', 'edit']);
+    Route::resource('payments', PaymentController::class)
+        ->parameters(['payments' => 'id'])
+        ->except(['create', 'edit']);
 });
 
 require __DIR__.'/settings.php';
