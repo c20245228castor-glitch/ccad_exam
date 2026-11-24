@@ -13,26 +13,47 @@ class DashboardService
     {
         $today = now()->toDateString();
         $latestRate = WaterRate::query()
+            ->select(['rate_id', 'rate_per_cu_m', 'effective_from', 'effective_to'])
             ->orderByDesc('effective_from')
+            ->first();
+
+        $meterStats = WaterMeter::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN is_active = ? THEN 1 END) AS active',
+                [true]
+            )
+            ->first();
+
+        $billStats = WaterBill::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN status = ? THEN 1 END) AS unpaid',
+                ['unpaid']
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN status = ? AND due_date < ? THEN 1 END) AS overdue',
+                ['unpaid', $today]
+            )
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN status = ? THEN total_water_bill ELSE 0 END), 0) AS paid_revenue',
+                ['paid']
+            )
             ->first();
 
         $stats = [
             'consumers' => Consumer::count(),
-            'totalMeters' => WaterMeter::count(),
-            'activeMeters' => WaterMeter::query()->where('is_active', true)->count(),
-            'totalBills' => WaterBill::count(),
-            'unpaidBills' => WaterBill::query()->where('status', 'unpaid')->count(),
-            'overdueBills' => WaterBill::query()
-                ->where('status', 'unpaid')
-                ->whereDate('due_date', '<', $today)
-                ->count(),
-            'paidRevenue' => WaterBill::query()
-                ->where('status', 'paid')
-                ->sum('total_water_bill'),
+            'totalMeters' => (int) $meterStats->total,
+            'activeMeters' => (int) $meterStats->active,
+            'totalBills' => (int) $billStats->total,
+            'unpaidBills' => (int) $billStats->unpaid,
+            'overdueBills' => (int) $billStats->overdue,
+            'paidRevenue' => $billStats->paid_revenue,
         ];
 
         $meters = WaterMeter::query()
-            ->with('consumer')
+            ->select(['meter_id', 'consumer_id', 'meter_serial', 'is_active'])
+            ->with('consumer:consumer_id,consumer_name')
             ->orderBy('meter_serial')
             ->get()
             ->map(function (WaterMeter $meter) {
@@ -45,7 +66,23 @@ class DashboardService
             });
 
         $bills = WaterBill::query()
-            ->with(['waterMeter.consumer', 'waterRate'])
+            ->select([
+                'bill_id',
+                'meter_id',
+                'rate_id',
+                'previous_reading',
+                'current_reading',
+                'consumption_cu_m',
+                'penalty_fee',
+                'total_water_bill',
+                'status',
+                'due_date',
+            ])
+            ->with([
+                'waterMeter:meter_id,consumer_id,meter_serial',
+                'waterMeter.consumer:consumer_id,consumer_name',
+                'waterRate:rate_id',
+            ])
             ->orderByDesc('billing_date')
             ->take(8)
             ->get()

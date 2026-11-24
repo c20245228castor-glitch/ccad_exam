@@ -13,12 +13,22 @@ class ConsumerService
 {
     public function indexData(?string $search = null): array
     {
+        $consumerStats = Consumer::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN EXISTS (SELECT 1 FROM water_meters WHERE water_meters.consumer_id = consumers.consumer_id) THEN 1 END) AS with_meters'
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN NOT EXISTS (SELECT 1 FROM water_meters WHERE water_meters.consumer_id = consumers.consumer_id) THEN 1 END) AS without_meters'
+            )
+            ->first();
+
         return [
             'consumers' => $this->paginate($search, 10),
             'stats' => [
-                'total' => Consumer::query()->count(),
-                'with_meters' => Consumer::query()->has('waterMeters')->count(),
-                'without_meters' => Consumer::query()->doesntHave('waterMeters')->count(),
+                'total' => (int) $consumerStats->total,
+                'with_meters' => (int) $consumerStats->with_meters,
+                'without_meters' => (int) $consumerStats->without_meters,
                 'active_meters' => WaterMeter::query()->where('is_active', true)->count(),
             ],
             'filter' => ['search' => $search ?? ''],

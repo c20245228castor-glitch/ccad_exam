@@ -14,24 +14,30 @@ class PaymentService
 {
     public function indexData(?string $search = null): array
     {
+        $paymentStats = Payment::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw('COALESCE(SUM(amount_paid), 0) AS amount_paid')
+            ->selectRaw('COUNT(DISTINCT bill_id) AS unique_bills')
+            ->first();
+
         return [
             'payments' => $this->paginate($search, 10),
             'stats' => [
-                'total' => Payment::query()->count(),
-                'amount_paid' => Payment::query()->sum('amount_paid'),
-                'unique_bills' => Payment::query()->distinct('bill_id')->count('bill_id'),
+                'total' => (int) $paymentStats->total,
+                'amount_paid' => $paymentStats->amount_paid,
+                'unique_bills' => (int) $paymentStats->unique_bills,
                 'recent' => Payment::query()
                     ->whereDate('payment_date', now()->toDateString())
                     ->count(),
             ],
-            'bills' => WaterBill::query()
+            'bills' => WaterBill::query() // THIS IS CORRECT
                 ->where(function ($query) {
                     $query->where('status', 'unpaid')
                         ->orWhereHas('payments');
                 })
                 ->with([
-                    'waterMeter:meter_id,consumer_id,meter_serial',
-                    'waterMeter.consumer:consumer_id,consumer_name,account_number',
+                    'waterMeter:meter_id,consumer_id,meter_serial', // CORRECT
+                    'waterMeter.consumer:consumer_id,consumer_name,account_number', //CORRECT
                 ])
                 ->select(['bill_id', 'meter_id', 'billing_date', 'total_water_bill', 'status'])
                 ->orderBy('bill_id')
@@ -51,7 +57,7 @@ class PaymentService
         int $perPage = 10
     ): LengthAwarePaginator {
         return Payment::query()
-            ->with('waterBill')
+            ->with('waterBill:bill_id,total_water_bill')
             ->when($search, function ($query, $search) {
                 $query->where('payment_reference', 'like', "%{$search}%");
             })
@@ -136,14 +142,17 @@ class PaymentService
                 ->whereKey($payment->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
-            $oldBill = WaterBill::query()
-                ->whereKey($payment->bill_id)
+            $bills = WaterBill::query()
+                ->whereKey([$payment->bill_id, $data['bill_id']])
+                ->orderBy('bill_id')
                 ->lockForUpdate()
-                ->firstOrFail();
-            $newBill = WaterBill::query()
-                ->whereKey($data['bill_id'])
-                ->lockForUpdate()
-                ->firstOrFail();
+                ->get()
+                ->keyBy('bill_id');
+
+            $oldBill = $bills->get($payment->bill_id)
+                ?? WaterBill::query()->findOrFail($payment->bill_id);
+            $newBill = $bills->get($data['bill_id'])
+                ?? WaterBill::query()->findOrFail($data['bill_id']);
 
             if (
                 $newBill->getKey() !== $oldBill->getKey()

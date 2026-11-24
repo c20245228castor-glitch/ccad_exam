@@ -14,16 +14,30 @@ class WaterBillService
 {
     public function indexData(?string $search = null): array
     {
+        $today = now()->toDateString();
+        $billStats = WaterBill::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN status = ? THEN 1 END) AS paid',
+                ['paid']
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN status = ? THEN 1 END) AS unpaid',
+                ['unpaid']
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN status = ? AND due_date < ? THEN 1 END) AS overdue',
+                ['unpaid', $today]
+            )
+            ->first();
+
         return [
             'bills' => $this->paginate($search, 10),
             'stats' => [
-                'total' => WaterBill::query()->count(),
-                'paid' => WaterBill::query()->where('status', 'paid')->count(),
-                'unpaid' => WaterBill::query()->where('status', 'unpaid')->count(),
-                'overdue' => WaterBill::query()
-                    ->where('status', 'unpaid')
-                    ->whereDate('due_date', '<', now()->toDateString())
-                    ->count(),
+                'total' => (int) $billStats->total,
+                'paid' => (int) $billStats->paid,
+                'unpaid' => (int) $billStats->unpaid,
+                'overdue' => (int) $billStats->overdue,
             ],
             'meters' => WaterMeter::query()
                 ->with('consumer:consumer_id,consumer_name')
@@ -53,7 +67,11 @@ class WaterBillService
     ): LengthAwarePaginator {
         return WaterBill::query()
             ->withExists('payments')
-            ->with(['waterMeter.consumer', 'waterRate'])
+            ->with([
+                'waterMeter:meter_id,consumer_id,meter_serial',
+                'waterMeter.consumer:consumer_id,consumer_name',
+                'waterRate:rate_id,rate_per_cu_m',
+            ])
             ->when($search, function ($query, $search) {
                 $query->whereHas('waterMeter', function ($q) use ($search) {
                     $q->where('meter_serial', 'like', "%{$search}%");

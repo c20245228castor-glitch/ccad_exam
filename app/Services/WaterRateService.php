@@ -12,20 +12,25 @@ class WaterRateService
 {
     public function indexData(?string $search = null): array
     {
+        $today = now()->toDateString();
+        $rateStats = WaterRate::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN effective_to IS NULL OR effective_to >= ? THEN 1 END) AS active',
+                [$today]
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN effective_to IS NOT NULL AND effective_to < ? THEN 1 END) AS expired',
+                [$today]
+            )
+            ->first();
+
         return [
             'waterRates' => $this->paginate($search, 10),
             'stats' => [
-                'total' => WaterRate::query()->count(),
-                'active' => WaterRate::query()
-                    ->where(function ($query) {
-                        $query->whereNull('effective_to')
-                            ->orWhere('effective_to', '>=', now()->toDateString());
-                    })
-                    ->count(),
-                'expired' => WaterRate::query()
-                    ->whereNotNull('effective_to')
-                    ->where('effective_to', '<', now()->toDateString())
-                    ->count(),
+                'total' => (int) $rateStats->total,
+                'active' => (int) $rateStats->active,
+                'expired' => (int) $rateStats->expired,
             ],
             'filter' => ['search' => $search ?? ''],
         ];

@@ -13,15 +13,30 @@ class WaterMeterService
 {
     public function indexData(?string $search = null): array
     {
+        $meterStats = WaterMeter::query()
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw(
+                'COUNT(CASE WHEN is_active = ? THEN 1 END) AS active',
+                [true]
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN is_active = ? THEN 1 END) AS inactive',
+                [false]
+            )
+            ->selectRaw(
+                'COUNT(CASE WHEN consumer_id IS NOT NULL THEN 1 END) AS assigned'
+            )
+            ->first();
+
         return [
             'waterMeters' => $this->paginate($search, 10),
             'stats' => [
-                'total' => WaterMeter::query()->count(),
-                'active' => WaterMeter::query()->where('is_active', true)->count(),
-                'inactive' => WaterMeter::query()->where('is_active', false)->count(),
-                'assigned' => WaterMeter::query()->whereNotNull('consumer_id')->count(),
+                'total' => (int) $meterStats->total,
+                'active' => (int) $meterStats->active,
+                'inactive' => (int) $meterStats->inactive,
+                'assigned' => (int) $meterStats->assigned,
             ],
-            'consumers' => Consumer::query()
+            'consumers' => Consumer::query() // CORRECT
                 ->select(['consumer_id', 'consumer_name', 'account_number'])
                 ->orderBy('consumer_name')
                 ->get(),
