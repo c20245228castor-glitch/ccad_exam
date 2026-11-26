@@ -1,7 +1,20 @@
 import AppLayout from '@/layouts/app-layout';
+import { formatAppDate, toAppDateInput } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
+
+function addOneMonth(date: string): string {
+    const [year, month, day] = date.split('-').map(Number);
+    const lastDayOfNextMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const nextMonthDate = new Date(Date.UTC(year, month, Math.min(day, lastDayOfNextMonth)));
+
+    return [
+        nextMonthDate.getUTCFullYear(),
+        String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0'),
+        String(nextMonthDate.getUTCDate()).padStart(2, '0'),
+    ].join('-');
+}
 
 type WaterBill = {
     bill_id: number;
@@ -13,6 +26,9 @@ type WaterBill = {
     due_date: string;
     consumption_cu_m: string | number;
     total_water_bill: string | number;
+    current_penalty_fee: string | number;
+    credit_applied: string | number;
+    amount_due: string | number;
     status: string;
     payments_exists: boolean;
     water_meter?: {
@@ -60,12 +76,14 @@ export default function WaterBillIndex({
     filter,
     meters,
     rates,
+    today,
 }: {
     bills: Paginated<WaterBill>;
     stats: BillStats;
     filter: { search: string };
     meters: MeterOption[];
     rates: RateOption[];
+    today: string;
 }) {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [recordError, setRecordError] = useState<string>();
@@ -104,8 +122,8 @@ export default function WaterBillIndex({
             rate_id: String(bill.rate_id),
             previous_reading: String(bill.previous_reading),
             current_reading: String(bill.current_reading),
-            billing_date: bill.billing_date.slice(0, 10),
-            due_date: bill.due_date.slice(0, 10),
+            billing_date: toAppDateInput(bill.billing_date),
+            due_date: toAppDateInput(bill.due_date),
         });
         setEditingId(bill.bill_id);
     };
@@ -123,6 +141,17 @@ export default function WaterBillIndex({
         { label: 'Unpaid', value: stats?.unpaid ?? 0 },
         { label: 'Overdue', value: stats?.overdue ?? 0 },
     ];
+    const selectedRate = rates.find((rate) => String(rate.rate_id) === form.data.rate_id);
+    const hasReadings = form.data.previous_reading !== '' && form.data.current_reading !== '';
+    const estimatedConsumption = hasReadings
+        ? Number(form.data.current_reading) - Number(form.data.previous_reading)
+        : null;
+    const readingsInvalid = estimatedConsumption !== null && estimatedConsumption <= 0;
+    const estimatedCharge =
+        estimatedConsumption !== null && selectedRate
+            ? estimatedConsumption * Number(selectedRate.rate_per_cu_m)
+            : null;
+    const maxDueDate = form.data.billing_date ? addOneMonth(form.data.billing_date) : undefined;
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -167,7 +196,21 @@ export default function WaterBillIndex({
                             id="bill-meter"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
                             value={form.data.meter_id}
-                            onChange={(event) => form.setData('meter_id', event.target.value)}
+                            disabled={Boolean(editingId)}
+                            onChange={(event) => {
+                                const meterId = event.target.value;
+
+                                if (meterId && !editingId) {
+                                    form.setData({
+                                        ...form.data,
+                                        meter_id: meterId,
+                                        billing_date: today,
+                                        due_date: addOneMonth(today),
+                                    });
+                                } else {
+                                    form.setData('meter_id', meterId);
+                                }
+                            }}
                             required
                         >
                             <option value="">Select a meter</option>
@@ -187,13 +230,14 @@ export default function WaterBillIndex({
                             id="bill-rate"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
                             value={form.data.rate_id}
+                            disabled={Boolean(editingId)}
                             onChange={(event) => form.setData('rate_id', event.target.value)}
                             required
                         >
                             <option value="">Select a rate</option>
                             {rates.map((rate) => (
                                 <option key={rate.rate_id} value={rate.rate_id}>
-                                    {Number(rate.rate_per_cu_m).toFixed(2)} per m³ (from {rate.effective_from.slice(0, 10)})
+                                    {Number(rate.rate_per_cu_m).toFixed(2)} per m³ (from {formatAppDate(rate.effective_from)})
                                 </option>
                             ))}
                         </select>
@@ -209,6 +253,7 @@ export default function WaterBillIndex({
                             min="0"
                             step="0.01"
                             type="number"
+                            readOnly={Boolean(editingId)}
                             value={form.data.previous_reading}
                             onChange={(event) => form.setData('previous_reading', event.target.value)}
                             required
@@ -222,7 +267,11 @@ export default function WaterBillIndex({
                         <input
                             id="bill-current"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
-                            min={form.data.previous_reading || '0'}
+                            min={
+                                form.data.previous_reading
+                                    ? (Number(form.data.previous_reading) + 0.01).toFixed(2)
+                                    : '0'
+                            }
                             step="0.01"
                             type="number"
                             value={form.data.current_reading}
@@ -230,6 +279,11 @@ export default function WaterBillIndex({
                             required
                         />
                         {form.errors.current_reading && <p className="mt-1 text-sm text-red-600">{form.errors.current_reading}</p>}
+                        {readingsInvalid && (
+                            <p className="mt-1 text-sm text-red-600">
+                                Current reading must be greater than previous reading.
+                            </p>
+                        )}
                     </div>
                     <div>
                         <label className="mb-1 block text-sm" htmlFor="bill-date">
@@ -239,8 +293,16 @@ export default function WaterBillIndex({
                             id="bill-date"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
                             type="date"
+                            disabled={Boolean(editingId)}
                             value={form.data.billing_date}
-                            onChange={(event) => form.setData('billing_date', event.target.value)}
+                            onChange={(event) => {
+                                const billingDate = event.target.value;
+                                form.setData({
+                                    ...form.data,
+                                    billing_date: billingDate,
+                                    due_date: billingDate ? addOneMonth(billingDate) : '',
+                                });
+                            }}
                             required
                         />
                         {form.errors.billing_date && <p className="mt-1 text-sm text-red-600">{form.errors.billing_date}</p>}
@@ -252,13 +314,28 @@ export default function WaterBillIndex({
                         <input
                             id="bill-due"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
-                            min={form.data.billing_date || undefined}
+                            min={maxDueDate}
+                            max={maxDueDate}
                             type="date"
+                            disabled={Boolean(editingId)}
                             value={form.data.due_date}
                             onChange={(event) => form.setData('due_date', event.target.value)}
                             required
                         />
                         {form.errors.due_date && <p className="mt-1 text-sm text-red-600">{form.errors.due_date}</p>}
+                    </div>
+                    <div className="text-muted-foreground space-y-1 text-sm md:col-span-3">
+                        <p>
+                            The bill uses (current reading − previous reading) × water rate. Selecting a meter only links the bill to
+                            that meter; enter its readings to calculate usage.
+                        </p>
+                        {estimatedConsumption !== null && selectedRate && estimatedConsumption > 0 && (
+                            <p>
+                                Estimated usage: {estimatedConsumption.toFixed(2)} m³ · Base water charge:{' '}
+                                {estimatedCharge?.toFixed(2)}
+                                . Any overdue penalty is calculated separately.
+                            </p>
+                        )}
                     </div>
                     <div className="flex items-end gap-2">
                         <button
@@ -294,7 +371,7 @@ export default function WaterBillIndex({
                                 <th className="px-4 py-3 font-medium">Billing date</th>
                                 <th className="px-4 py-3 font-medium">Due date</th>
                                 <th className="px-4 py-3 text-right font-medium">Usage</th>
-                                <th className="px-4 py-3 text-right font-medium">Total</th>
+                                <th className="px-4 py-3 text-right font-medium">Amount due</th>
                                 <th className="px-4 py-3 font-medium">Status</th>
                                 <th className="px-4 py-3 font-medium">Actions</th>
                             </tr>
@@ -306,14 +383,26 @@ export default function WaterBillIndex({
                                         <div className="font-medium">{bill.water_meter?.consumer?.consumer_name ?? 'Unknown consumer'}</div>
                                         <div className="text-muted-foreground">{bill.water_meter?.meter_serial ?? 'Unknown meter'}</div>
                                     </td>
-                                    <td className="px-4 py-3">{bill.billing_date}</td>
-                                    <td className="px-4 py-3">{bill.due_date}</td>
+                                    <td className="px-4 py-3">{formatAppDate(bill.billing_date)}</td>
+                                    <td className="px-4 py-3">{formatAppDate(bill.due_date)}</td>
                                     <td className="px-4 py-3 text-right">{Number(bill.consumption_cu_m).toFixed(2)} m³</td>
-                                    <td className="px-4 py-3 text-right">{Number(bill.total_water_bill).toFixed(2)}</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <div>{Number(bill.amount_due).toFixed(2)}</div>
+                                        {Number(bill.current_penalty_fee) > 0 && (
+                                            <div className="text-red-600 text-xs">
+                                                Late penalty: {Number(bill.current_penalty_fee).toFixed(2)}
+                                            </div>
+                                        )}
+                                        {Number(bill.credit_applied) > 0 && (
+                                            <div className="text-muted-foreground text-xs">
+                                                Credit applied: {Number(bill.credit_applied).toFixed(2)}
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="px-4 py-3 capitalize">{bill.status}</td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-2">
-                                            {!bill.payments_exists && (
+                                            {bill.status === 'unpaid' && !bill.payments_exists && (
                                                 <>
                                                     <button className="rounded border px-2 py-1" onClick={() => edit(bill)} type="button">
                                                         Edit
@@ -333,7 +422,11 @@ export default function WaterBillIndex({
                                                     </button>
                                                 </>
                                             )}
-                                            {bill.payments_exists && <span className="text-muted-foreground">Payment recorded</span>}
+                                            {(bill.payments_exists || bill.status === 'paid') && (
+                                                <span className="text-muted-foreground">
+                                                    {bill.payments_exists ? 'Payment recorded' : 'Paid by account credit'}
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>

@@ -29,6 +29,8 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
+        abort_if($request->user()->isAdmin(), 403);
+
         $request->user()->fill($request->validated());
 
         if ($request->user()->isDirty('email')) {
@@ -45,6 +47,8 @@ class ProfileController extends Controller
      */
     public function destroy(Request $request): RedirectResponse
     {
+        abort_if($request->user()->isAdmin(), 403);
+
         $request->validate([
             'password' => ['required', 'current_password'],
         ]);

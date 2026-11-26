@@ -45,6 +45,7 @@ class ConsumerService
         int $perPage = 10
     ): LengthAwarePaginator {
         return Consumer::query()
+            ->with('user:consumer_id,email')
             ->when($search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('consumer_name', 'like', "%{$search}%")
@@ -74,18 +75,26 @@ class ConsumerService
         $data = $this->sanitizeData($data);
         $this->validateCleanedData($data);
 
-        return DB::transaction(function () use ($data) {
-            $consumer = Consumer::create([
-                ...$data,
-                'account_number' => 'PENDING-'.Str::ulid(),
+        return DB::transaction(fn () => $this->createConsumerRecord($data));
+    }
+
+    public function createWithAccount(array $data): Consumer
+    {
+        $email = mb_strtolower(trim((string) $data['email']));
+        $password = (string) $data['password'];
+        unset($data['email'], $data['password'], $data['password_confirmation'], $data['account_number']);
+
+        $data = $this->sanitizeData($data);
+        $this->validateCleanedData($data);
+
+        return DB::transaction(function () use ($data, $email, $password) {
+            $consumer = $this->createConsumerRecord($data);
+            $consumer->user()->create([
+                'name' => $consumer->consumer_name,
+                'email' => $email,
+                'password' => $password,
+                'role' => 'user',
             ]);
-
-            $number = 1000 + (int) $consumer->getKey();
-            do {
-                $accountNumber = 'ACC-'.str_pad((string) $number++, 4, '0', STR_PAD_LEFT);
-            } while (Consumer::query()->where('account_number', $accountNumber)->exists());
-
-            $consumer->update(['account_number' => $accountNumber]);
 
             return $consumer->refresh();
         });
@@ -118,6 +127,12 @@ class ConsumerService
                 ]);
             }
 
+            if ($consumer->user()->exists()) {
+                throw ValidationException::withMessages([
+                    'record' => 'Cannot delete a consumer account linked to a user.',
+                ]);
+            }
+
             return (bool) $consumer->delete();
         });
     }
@@ -133,5 +148,22 @@ class ConsumerService
                 ]);
             }
         }
+    }
+
+    private function createConsumerRecord(array $data): Consumer
+    {
+        $consumer = Consumer::create([
+            ...$data,
+            'account_number' => 'PENDING-'.Str::ulid(),
+        ]);
+
+        $number = 1000 + (int) $consumer->getKey();
+        do {
+            $accountNumber = 'ACC-'.str_pad((string) $number++, 4, '0', STR_PAD_LEFT);
+        } while (Consumer::query()->where('account_number', $accountNumber)->exists());
+
+        $consumer->update(['account_number' => $accountNumber]);
+
+        return $consumer;
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
+use App\Models\User;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -32,9 +33,11 @@ class PasswordResetLinkController extends Controller
             'email' => 'required|email',
         ]);
 
-        Password::sendResetLink(
-            $request->only('email')
-        );
+        $user = User::query()->where('email', $request->input('email'))->first();
+
+        if ($user && ! $user->isAdmin()) {
+            Password::sendResetLink($request->only('email'));
+        }
 
         return back()->with('status', __('A reset link will be sent if the account exists.'));
     }

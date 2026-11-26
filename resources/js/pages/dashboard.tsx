@@ -18,15 +18,32 @@ type RecentBill = {
     consumer_name: string;
     meter_serial: string;
     consumption_cu_m: number;
-    total_water_bill: number;
+    amount_due: number;
+    current_penalty_fee: number;
+    credit_applied: number;
     status: string;
     is_overdue: boolean;
     due_date?: string | null;
 };
 
+type RegisteredConsumer = {
+    account_number: string;
+    consumer_name: string;
+    consumer_address: string;
+    email: string | null;
+};
+
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Dashboard', href: '/dashboard' }];
 
-export default function Dashboard({ stats, bills }: { stats: DashboardStats; bills: RecentBill[] }) {
+export default function Dashboard({
+    stats,
+    bills,
+    registeredConsumers,
+}: {
+    stats: DashboardStats;
+    bills: RecentBill[];
+    registeredConsumers: RegisteredConsumer[];
+}) {
     const statCards = [
         { title: 'Total Consumers', value: Number(stats?.consumers ?? 0).toLocaleString() },
         { title: 'Water Meters', value: Number(stats?.totalMeters ?? 0).toLocaleString() },
@@ -63,6 +80,47 @@ export default function Dashboard({ stats, bills }: { stats: DashboardStats; bil
                     ))}
                 </div>
 
+                <section className="mt-8 rounded-lg bg-white p-5 shadow-sm">
+                    <div className="mb-5 flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-bold">Registered consumers</h3>
+                            <p className="mt-1 text-sm text-gray-500">Accounts created when users sign up</p>
+                        </div>
+                        <Link href={route('water-meters.index')} className="text-sm text-cyan-600 hover:underline">
+                            Assign a meter
+                        </Link>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="border-b bg-gray-50 text-gray-500">
+                                <tr>
+                                    <th className="p-3">Account number</th>
+                                    <th className="p-3">Consumer</th>
+                                    <th className="p-3">Address</th>
+                                    <th className="p-3">Login email</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {registeredConsumers.map((consumer) => (
+                                    <tr key={consumer.account_number} className="border-b">
+                                        <td className="p-3 font-medium">{consumer.account_number}</td>
+                                        <td className="p-3">{consumer.consumer_name}</td>
+                                        <td className="p-3">{consumer.consumer_address}</td>
+                                        <td className="p-3">{consumer.email ?? '—'}</td>
+                                    </tr>
+                                ))}
+                                {registeredConsumers.length === 0 && (
+                                    <tr>
+                                        <td className="p-3 text-center text-gray-500" colSpan={4}>
+                                            No registered consumers yet.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
                 {/* Billing Table */}
                 <div className="mt-8 rounded-lg bg-white p-5 shadow-sm">
                     <div className="mb-5 flex items-center justify-between">
@@ -95,7 +153,19 @@ export default function Dashboard({ stats, bills }: { stats: DashboardStats; bil
                                             <td className="p-3">WB-{String(bill.bill_id).padStart(3, '0')}</td>
                                             <td className="p-3">{bill.consumer_name}</td>
                                             <td className="p-3">{Number(bill.consumption_cu_m).toFixed(2)} m³</td>
-                                            <td className="p-3 font-medium">₱{Number(bill.total_water_bill).toLocaleString()}</td>
+                                            <td className="p-3 font-medium">
+                                                ₱{Number(bill.amount_due).toLocaleString()}
+                                                {bill.current_penalty_fee > 0 && (
+                                                    <div className="text-xs text-red-600">
+                                                        Penalty: ₱{Number(bill.current_penalty_fee).toFixed(2)}
+                                                    </div>
+                                                )}
+                                                {bill.credit_applied > 0 && (
+                                                    <div className="text-xs text-gray-500">
+                                                        Credit applied: ₱{Number(bill.credit_applied).toFixed(2)}
+                                                    </div>
+                                                )}
+                                            </td>
                                             <td className="p-3">
                                                 <span className={`rounded-full px-3 py-1 text-xs ${statusClass}`}>{statusLabel}</span>
                                             </td>

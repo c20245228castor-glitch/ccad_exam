@@ -7,6 +7,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Payment extends Model
 {
+    public const METHODS = [
+        'cash' => 'Cash',
+        'gcash' => 'GCash',
+        'paypal' => 'PayPal',
+        'maya' => 'Maya',
+    ];
+
     protected $primaryKey = 'payment_id';
 
     protected $fillable = [
@@ -14,6 +21,7 @@ class Payment extends Model
         'amount_paid',
         'payment_date',
         'payment_reference',
+        'payment_method',
     ];
 
     protected $casts = [

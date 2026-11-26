@@ -10,8 +10,11 @@ import { Label } from '@/components/ui/label';
 import AuthLayout from '@/layouts/auth-layout';
 
 interface RegisterForm {
+    [key: string]: string;
     name: string;
+    username: string;
     email: string;
+    consumer_address: string;
     password: string;
     password_confirmation: string;
 }
@@ -19,7 +22,9 @@ interface RegisterForm {
 export default function Register() {
     const { data, setData, post, processing, errors, reset } = useForm<RegisterForm>({
         name: '',
+        username: '',
         email: '',
+        consumer_address: '',
         password: '',
         password_confirmation: '',
     });
@@ -54,12 +59,28 @@ export default function Register() {
                     </div>
 
                     <div className="grid gap-2">
+                        <Label htmlFor="username">Username</Label>
+                        <Input
+                            id="username"
+                            type="text"
+                            required
+                            tabIndex={2}
+                            autoComplete="username"
+                            value={data.username}
+                            onChange={(e) => setData('username', e.target.value)}
+                            disabled={processing}
+                            placeholder="Choose a username"
+                        />
+                        <InputError message={errors.username} />
+                    </div>
+
+                    <div className="grid gap-2">
                         <Label htmlFor="email">Email address</Label>
                         <Input
                             id="email"
                             type="email"
                             required
-                            tabIndex={2}
+                            tabIndex={3}
                             autoComplete="email"
                             value={data.email}
                             onChange={(e) => setData('email', e.target.value)}
@@ -70,12 +91,28 @@ export default function Register() {
                     </div>
 
                     <div className="grid gap-2">
+                        <Label htmlFor="consumer_address">Service address</Label>
+                        <Input
+                            id="consumer_address"
+                            type="text"
+                            required
+                            tabIndex={4}
+                            autoComplete="street-address"
+                            value={data.consumer_address}
+                            onChange={(e) => setData('consumer_address', e.target.value)}
+                            disabled={processing}
+                            placeholder="Your service address"
+                        />
+                        <InputError message={errors.consumer_address} />
+                    </div>
+
+                    <div className="grid gap-2">
                         <Label htmlFor="password">Password</Label>
                         <Input
                             id="password"
                             type="password"
                             required
-                            tabIndex={3}
+                            tabIndex={5}
                             autoComplete="new-password"
                             value={data.password}
                             onChange={(e) => setData('password', e.target.value)}
@@ -91,7 +128,7 @@ export default function Register() {
                             id="password_confirmation"
                             type="password"
                             required
-                            tabIndex={4}
+                            tabIndex={6}
                             autoComplete="new-password"
                             value={data.password_confirmation}
                             onChange={(e) => setData('password_confirmation', e.target.value)}
@@ -101,7 +138,7 @@ export default function Register() {
                         <InputError message={errors.password_confirmation} />
                     </div>
 
-                    <Button type="submit" className="mt-2 w-full" tabIndex={5} disabled={processing}>
+                    <Button type="submit" className="mt-2 w-full" tabIndex={7} disabled={processing}>
                         {processing && <LoaderCircle className="h-4 w-4 animate-spin" />}
                         Create account
                     </Button>
@@ -109,7 +146,7 @@ export default function Register() {
 
                 <div className="text-muted-foreground text-center text-sm">
                     Already have an account?{' '}
-                    <TextLink href={route('login')} tabIndex={6}>
+                    <TextLink href={route('login')} tabIndex={8}>
                         Log in
                     </TextLink>
                 </div>

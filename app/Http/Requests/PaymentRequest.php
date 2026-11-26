@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Payment;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class PaymentRequest extends FormRequest
 {
@@ -22,7 +24,14 @@ class PaymentRequest extends FormRequest
             'amount_paid' => [
                 'required',
                 'numeric',
-                'min:0',
+                'gt:0',
+                'decimal:0,2',
+                'max:99999999.99',
+            ],
+            'payment_method' => [
+                'nullable',
+                'string',
+                Rule::in(array_keys(Payment::METHODS)),
             ],
             'payment_date' => [
                 'required',
@@ -39,7 +48,10 @@ class PaymentRequest extends FormRequest
             'bill_id.exists' => 'The selected bill does not exist.',
             'amount_paid.required' => 'The payment amount is required.',
             'amount_paid.numeric' => 'The payment amount must be a valid number.',
-            'amount_paid.min' => 'The payment amount cannot be less than 0.',
+            'amount_paid.gt' => 'The payment amount must be greater than 0.',
+            'amount_paid.decimal' => 'The payment amount can have at most 2 decimal places.',
+            'amount_paid.max' => 'The payment amount is too large.',
+            'payment_method.in' => 'Select a supported payment method.',
             'payment_date.required' => 'The payment date is required.',
             'payment_date.date_format' => 'Enter a valid payment date and time.',
         ];

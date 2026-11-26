@@ -39,12 +39,50 @@ class PaymentServiceTest extends TestCase
             'bill_id' => $bill->bill_id,
             'status' => 'paid',
         ]);
+        $this->assertSame('5.00', (string) $bill->waterMeter->consumer->fresh()->account_credit);
+    }
+
+    public function test_partial_payments_reduce_the_balance_until_the_bill_is_paid(): void
+    {
+        $bill = $this->createBill();
+        $service = new PaymentService;
+        $firstPayment = $service->create([
+            'bill_id' => $bill->bill_id,
+            'amount_paid' => '6.00',
+            'payment_date' => '2026-11-12T09:00',
+            'payment_method' => 'gcash',
+        ]);
+
+        $this->assertSame('gcash', $firstPayment->payment_method);
+        $this->assertSame(9.0, $bill->fresh()->amount_due);
+        $this->assertSame('0.00', (string) $bill->waterMeter->consumer->fresh()->account_credit);
+        $this->assertDatabaseHas('water_bills', [
+            'bill_id' => $bill->bill_id,
+            'status' => 'unpaid',
+        ]);
+        $this->assertSame(0, (new PaymentService)->indexData()['stats']['unique_bills']);
+
+        $service->create([
+            'bill_id' => $bill->bill_id,
+            'amount_paid' => '9.00',
+            'payment_date' => '2026-11-12T10:00',
+            'payment_method' => 'paypal',
+        ]);
+
+        $this->assertSame(0.0, $bill->fresh()->amount_due);
+        $this->assertDatabaseHas('water_bills', [
+            'bill_id' => $bill->bill_id,
+            'status' => 'paid',
+        ]);
+        $this->assertSame(1, (new PaymentService)->indexData()['stats']['unique_bills']);
     }
 
     public function test_it_updates_bill_status_when_moving_a_payment(): void
     {
         $oldBill = $this->createBill();
         $newBill = $this->createBill();
+        $oldConsumer = $oldBill->waterMeter->consumer;
+        $newConsumer = $newBill->waterMeter->consumer;
         $service = new PaymentService;
         $payment = $service->create([
             'bill_id' => $oldBill->bill_id,
@@ -69,6 +107,8 @@ class PaymentServiceTest extends TestCase
             'bill_id' => $newBill->bill_id,
             'status' => 'paid',
         ]);
+        $this->assertSame('0.00', (string) $oldConsumer->fresh()->account_credit);
+        $this->assertSame('10.00', (string) $newConsumer->fresh()->account_credit);
     }
 
     public function test_it_marks_the_bill_unpaid_when_deleting_its_payment(): void
@@ -86,6 +126,7 @@ class PaymentServiceTest extends TestCase
             'bill_id' => $bill->bill_id,
             'status' => 'unpaid',
         ]);
+        $this->assertSame('0.00', (string) $bill->waterMeter->consumer->fresh()->account_credit);
     }
 
     private function createBill(): WaterBill

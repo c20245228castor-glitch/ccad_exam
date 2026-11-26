@@ -75,9 +75,11 @@ class DashboardService
                 'consumption_cu_m',
                 'penalty_fee',
                 'total_water_bill',
+                'credit_applied',
                 'status',
                 'due_date',
             ])
+            ->withSum('payments', 'amount_paid')
             ->with([
                 'waterMeter:meter_id,consumer_id,meter_serial',
                 'waterMeter.consumer:consumer_id,consumer_name',
@@ -95,7 +97,10 @@ class DashboardService
                     'current_reading' => (float) $bill->current_reading,
                     'consumption_cu_m' => (float) $bill->consumption_cu_m,
                     'penalty_fee' => (float) $bill->penalty_fee,
+                    'current_penalty_fee' => $bill->current_penalty_fee,
                     'total_water_bill' => (float) $bill->total_water_bill,
+                    'credit_applied' => (float) $bill->credit_applied,
+                    'amount_due' => $bill->amount_due,
                     'status' => $bill->status,
                     'due_date' => $bill->due_date?->toDateString(),
                     'is_overdue' => $bill->status === 'unpaid'
@@ -103,6 +108,19 @@ class DashboardService
                         && $bill->due_date->toDateString() < $today,
                 ];
             });
+
+        $registeredConsumers = Consumer::query()
+            ->whereHas('user')
+            ->with('user:consumer_id,name,email')
+            ->orderByDesc('created_at')
+            ->take(8)
+            ->get(['consumer_id', 'account_number', 'consumer_name', 'consumer_address', 'created_at'])
+            ->map(fn (Consumer $consumer) => [
+                'account_number' => $consumer->account_number,
+                'consumer_name' => $consumer->consumer_name,
+                'consumer_address' => $consumer->consumer_address,
+                'email' => $consumer->user?->email,
+            ]);
 
         return [
             'stats' => $stats,
@@ -113,6 +131,7 @@ class DashboardService
             ] : null,
             'meters' => $meters,
             'bills' => $bills,
+            'registeredConsumers' => $registeredConsumers,
         ];
     }
 }

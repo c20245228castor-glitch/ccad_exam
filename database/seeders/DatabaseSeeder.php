@@ -9,16 +9,21 @@ use App\Models\WaterBill;
 use App\Models\WaterMeter;
 use App\Models\WaterRate;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        $this->call(AdminUserSeeder::class);
+
+        $testUser = User::query()->firstOrCreate(
+            ['email' => 'test@example.com'],
+            [
+                'name' => 'Test User',
+                'username' => 'test-user',
+                'password' => 'password',
+            ]
+        );
 
         $consumers = [
             ['account_number' => 'ACC-1001', 'consumer_name' => 'Juan Dela Cruz', 'consumer_address' => 'Block 1, San Vicente'],
@@ -34,6 +39,11 @@ class DatabaseSeeder extends Seeder
                 ['account_number' => $consumer['account_number']],
                 $consumer
             );
+        }
+
+        $testConsumer = Consumer::query()->where('account_number', 'ACC-1001')->firstOrFail();
+        if ($testUser->consumer_id === null) {
+            $testUser->forceFill(['consumer_id' => $testConsumer->consumer_id])->save();
         }
 
         $rate = WaterRate::query()->firstOrCreate([

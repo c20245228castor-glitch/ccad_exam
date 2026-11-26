@@ -22,7 +22,10 @@ class BusinessFormRequestTest extends TestCase
 
     public function test_consumer_request_returns_custom_validation_messages(): void
     {
-        $this->actingAs(User::factory()->create())
+        $admin = User::factory()->create();
+        $admin->forceFill(['role' => 'admin'])->save();
+
+        $this->actingAs($admin)
             ->post('/consumers', [
                 'consumer_name' => '',
                 'consumer_address' => '',

@@ -36,6 +36,7 @@ type ConsumerOption = {
     consumer_id: number;
     consumer_name: string;
     account_number: string;
+    water_meters_count: number;
 };
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Water meters', href: '/water-meters' }];
@@ -157,8 +158,15 @@ export default function WaterMeterIndex({
                         >
                             <option value="">Select a consumer</option>
                             {consumers.map((consumer) => (
-                                <option key={consumer.consumer_id} value={consumer.consumer_id}>
+                                <option
+                                    key={consumer.consumer_id}
+                                    value={consumer.consumer_id}
+                                    disabled={consumer.water_meters_count > 0 && String(consumer.consumer_id) !== form.data.consumer_id}
+                                >
                                     {consumer.consumer_name} ({consumer.account_number})
+                                    {consumer.water_meters_count > 0 && String(consumer.consumer_id) !== form.data.consumer_id
+                                        ? ' — already has a meter'
+                                        : ''}
                                 </option>
                             ))}
                         </select>

@@ -26,7 +26,7 @@ class ConsumerController extends Controller
 
     public function store(ConsumerRequest $request)
     {
-        $this->consumerService->create($request->validated());
+        $this->consumerService->createWithAccount($request->validated());
 
         return back()->with('success', 'Consumer created successfully.');
     }

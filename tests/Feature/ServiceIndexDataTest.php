@@ -103,7 +103,7 @@ class ServiceIndexDataTest extends TestCase
         );
         $this->assertTrue(
             collect($billData['bills']->items())->contains(
-                fn (WaterBill $bill) => $bill->bill_id === $overdueBill->bill_id
+                fn (array $bill) => $bill['bill_id'] === $overdueBill->bill_id
             )
         );
     }

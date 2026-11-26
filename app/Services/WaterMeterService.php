@@ -38,6 +38,7 @@ class WaterMeterService
             ],
             'consumers' => Consumer::query() // CORRECT
                 ->select(['consumer_id', 'consumer_name', 'account_number'])
+                ->withCount('waterMeters')
                 ->orderBy('consumer_name')
                 ->get(),
             'filter' => ['search' => $search ?? ''],
@@ -81,6 +82,13 @@ class WaterMeterService
         $data = $this->sanitizeData($data);
 
         return DB::transaction(function () use ($data) {
+            $consumer = Consumer::query()
+                ->whereKey($data['consumer_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $this->ensureConsumerHasNoMeter((int) $consumer->getKey());
+
             $waterMeter = WaterMeter::create([
                 ...$data,
                 'meter_serial' => 'PENDING-'.Str::ulid(),
@@ -103,6 +111,18 @@ class WaterMeterService
         $data = $this->sanitizeData($data);
 
         return DB::transaction(function () use ($waterMeter, $data) {
+            if (isset($data['consumer_id']) && (int) $data['consumer_id'] !== (int) $waterMeter->consumer_id) {
+                $consumer = Consumer::query()
+                    ->whereKey($data['consumer_id'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $this->ensureConsumerHasNoMeter(
+                    (int) $consumer->getKey(),
+                    (int) $waterMeter->getKey()
+                );
+            }
+
             $waterMeter->update($data);
 
             return $waterMeter->refresh();
@@ -125,5 +145,21 @@ class WaterMeterService
 
             return (bool) $waterMeter->delete();
         });
+    }
+
+    private function ensureConsumerHasNoMeter(int $consumerId, ?int $exceptMeterId = null): void
+    {
+        $query = WaterMeter::query()
+            ->where('consumer_id', $consumerId);
+
+        if ($exceptMeterId !== null) {
+            $query->where('meter_id', '!=', $exceptMeterId);
+        }
+
+        if ($query->exists()) {
+            throw ValidationException::withMessages([
+                'consumer_id' => 'This consumer already has a water meter.',
+            ]);
+        }
     }
 }

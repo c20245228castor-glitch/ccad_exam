@@ -1,4 +1,5 @@
 import AppLayout from '@/layouts/app-layout';
+import { formatAppDate, toAppDateInput } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
@@ -69,8 +70,8 @@ export default function WaterRateIndex({
         setRecordError(undefined);
         form.setData({
             rate_per_cu_m: String(rate.rate_per_cu_m),
-            effective_from: rate.effective_from,
-            effective_to: rate.effective_to ?? '',
+            effective_from: toAppDateInput(rate.effective_from),
+            effective_to: toAppDateInput(rate.effective_to),
         });
         setEditingId(rate.rate_id);
     };
@@ -206,8 +207,10 @@ export default function WaterRateIndex({
                             {waterRates.data.map((rate) => (
                                 <tr key={rate.rate_id}>
                                     <td className="px-4 py-3 font-medium">{Number(rate.rate_per_cu_m).toFixed(2)}</td>
-                                    <td className="px-4 py-3">{rate.effective_from}</td>
-                                    <td className="px-4 py-3">{rate.effective_to ?? 'No end date'}</td>
+                                    <td className="px-4 py-3">{formatAppDate(rate.effective_from)}</td>
+                                    <td className="px-4 py-3">
+                                        {rate.effective_to ? formatAppDate(rate.effective_to) : 'No end date'}
+                                    </td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-2">
                                             <button className="rounded border px-2 py-1" onClick={() => edit(rate)} type="button">

@@ -1,4 +1,5 @@
 import AppLayout from '@/layouts/app-layout';
+import { formatAppDate } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
@@ -10,7 +11,8 @@ type Payment = {
     payment_date: string;
     payment_date_input: string;
     payment_reference: string;
-    water_bill?: { total_water_bill: string | number } | null;
+    payment_method: string;
+    water_bill?: { amount_due: string | number } | null;
 };
 
 type PageLink = {
@@ -34,7 +36,8 @@ type PaymentStats = {
 type BillOption = {
     bill_id: number;
     billing_date: string;
-    total_water_bill: string | number;
+    amount_due: string | number;
+    credit_applied: string | number;
     status: string;
     water_meter?: {
         meter_serial: string;
@@ -53,12 +56,14 @@ export default function PaymentIndex({
     filter,
     bills,
     paymentDateNow,
+    paymentMethods,
 }: {
     payments: Paginated<Payment>;
     stats: PaymentStats;
     filter: { search: string };
     bills: BillOption[];
     paymentDateNow: string;
+    paymentMethods: Record<string, string>;
 }) {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [recordError, setRecordError] = useState<string>();
@@ -67,7 +72,13 @@ export default function PaymentIndex({
         bill_id: '',
         amount_paid: '',
         payment_date: paymentDateNow,
+        payment_method: 'cash',
     });
+    const selectedBill = availableBills.find((bill) => String(bill.bill_id) === form.data.bill_id);
+    const changeToCredit =
+        selectedBill && form.data.amount_paid !== ''
+            ? Number(form.data.amount_paid) - Number(selectedBill.amount_due)
+            : 0;
 
     const submit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -94,6 +105,7 @@ export default function PaymentIndex({
             bill_id: String(payment.bill_id),
             amount_paid: String(payment.amount_paid),
             payment_date: payment.payment_date_input,
+            payment_method: payment.payment_method,
         });
         setEditingId(payment.payment_id);
     };
@@ -148,7 +160,7 @@ export default function PaymentIndex({
                 <form onSubmit={submit} className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
                     <h2 className="font-medium md:col-span-4">{editingId ? 'Edit payment' : 'Record payment'}</h2>
                     <p className="text-muted-foreground text-sm md:col-span-4">
-                        A payment reference is generated automatically after successful payment.
+                        A payment reference is generated automatically. Methods are recorded only; no money is processed.
                     </p>
                     <div>
                         <label className="mb-1 block text-sm" htmlFor="payment-bill">
@@ -172,9 +184,9 @@ export default function PaymentIndex({
                                     {' - Bill #'}
                                     {bill.bill_id}
                                     {' ('}
-                                    {bill.billing_date.slice(0, 10)}
+                                    {formatAppDate(bill.billing_date)}
                                     {') - '}
-                                    {Number(bill.total_water_bill).toFixed(2)}
+                                    {Number(bill.amount_due).toFixed(2)}
                                     {' ('}
                                     {bill.status}
                                     {')'}
@@ -190,7 +202,7 @@ export default function PaymentIndex({
                         <input
                             id="payment-amount"
                             className="bg-background h-9 w-full rounded-md border px-3 text-sm"
-                            min="0"
+                            min="0.01"
                             step="0.01"
                             type="number"
                             value={form.data.amount_paid}
@@ -198,6 +210,33 @@ export default function PaymentIndex({
                             required
                         />
                         {form.errors.amount_paid && <p className="mt-1 text-sm text-red-600">{form.errors.amount_paid}</p>}
+                        {selectedBill && !editingId && form.data.amount_paid !== '' && changeToCredit < 0 && (
+                            <p className="text-muted-foreground mt-1 text-xs">
+                                Remaining balance after payment: {Math.abs(changeToCredit).toFixed(2)}.
+                            </p>
+                        )}
+                        {selectedBill && !editingId && changeToCredit > 0 && (
+                            <p className="text-muted-foreground mt-1 text-xs">
+                                Extra {changeToCredit.toFixed(2)} will be credited to the consumer&apos;s account.
+                            </p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="mb-1 block text-sm" htmlFor="payment-method">
+                            Payment method
+                        </label>
+                        <select
+                            id="payment-method"
+                            className="bg-background h-9 w-full rounded-md border px-3 text-sm"
+                            value={form.data.payment_method}
+                            onChange={(event) => form.setData('payment_method', event.target.value)}
+                            required
+                        >
+                            {Object.entries(paymentMethods).map(([value, label]) => (
+                                <option key={value} value={value}>{label}</option>
+                            ))}
+                        </select>
+                        {form.errors.payment_method && <p className="mt-1 text-sm text-red-600">{form.errors.payment_method}</p>}
                     </div>
                     <div>
                         <label className="mb-1 block text-sm" htmlFor="payment-date">
@@ -247,8 +286,9 @@ export default function PaymentIndex({
                                 <th className="px-4 py-3 font-medium">Reference</th>
                                 <th className="px-4 py-3 font-medium">Bill</th>
                                 <th className="px-4 py-3 font-medium">Payment date</th>
+                                <th className="px-4 py-3 font-medium">Method</th>
                                 <th className="px-4 py-3 text-right font-medium">Amount paid</th>
-                                <th className="px-4 py-3 text-right font-medium">Bill total</th>
+                                <th className="px-4 py-3 text-right font-medium">Amount due</th>
                                 <th className="px-4 py-3 font-medium">Actions</th>
                             </tr>
                         </thead>
@@ -258,9 +298,10 @@ export default function PaymentIndex({
                                     <td className="px-4 py-3 font-medium">{payment.payment_reference}</td>
                                     <td className="px-4 py-3">#{payment.bill_id}</td>
                                     <td className="px-4 py-3">{payment.payment_date}</td>
+                                    <td className="px-4 py-3">{paymentMethods[payment.payment_method] ?? payment.payment_method}</td>
                                     <td className="px-4 py-3 text-right">{Number(payment.amount_paid).toFixed(2)}</td>
                                     <td className="px-4 py-3 text-right">
-                                        {payment.water_bill ? Number(payment.water_bill.total_water_bill).toFixed(2) : '—'}
+                                        {payment.water_bill ? Number(payment.water_bill.amount_due).toFixed(2) : '—'}
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-2">
@@ -288,7 +329,7 @@ export default function PaymentIndex({
                             ))}
                             {payments.data.length === 0 && (
                                 <tr>
-                                    <td className="text-muted-foreground px-4 py-8 text-center" colSpan={6}>
+                                    <td className="text-muted-foreground px-4 py-8 text-center" colSpan={7}>
                                         No payments found.
                                     </td>
                                 </tr>

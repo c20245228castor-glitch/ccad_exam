@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Consumer;
 use App\Models\WaterBill;
 use App\Models\WaterMeter;
 use App\Models\WaterRate;
@@ -33,6 +34,7 @@ class WaterBillService
 
         return [
             'bills' => $this->paginate($search, 10),
+            'today' => $today,
             'stats' => [
                 'total' => (int) $billStats->total,
                 'paid' => (int) $billStats->paid,
@@ -46,7 +48,8 @@ class WaterBillService
                 ->get(),
             'rates' => WaterRate::query()
                 ->select(['rate_id', 'rate_per_cu_m', 'effective_from', 'effective_to'])
-                ->orderBy('effective_from', 'desc')
+                ->orderByDesc('effective_from')
+                ->limit(20)
                 ->get(),
             'filter' => ['search' => $search ?? ''],
         ];
@@ -67,6 +70,7 @@ class WaterBillService
     ): LengthAwarePaginator {
         return WaterBill::query()
             ->withExists('payments')
+            ->withSum('payments', 'amount_paid')
             ->with([
                 'waterMeter:meter_id,consumer_id,meter_serial',
                 'waterMeter.consumer:consumer_id,consumer_name',
@@ -78,7 +82,11 @@ class WaterBillService
                 })->orWhere('status', 'like', "%{$search}%");
             })
             ->paginate($perPage)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn (WaterBill $bill) => [
+                ...$bill->toArray(),
+                'current_penalty_fee' => $bill->current_penalty_fee,
+            ]);
     }
 
     public function sanitizeData(array $data): array
@@ -106,15 +114,19 @@ class WaterBillService
 
     private function calculate(array $data): array
     {
-        if ((float) $data['current_reading'] < (float) $data['previous_reading']) {
+        if ((float) $data['current_reading'] <= (float) $data['previous_reading']) {
             throw ValidationException::withMessages([
-                'current_reading' => 'Current reading cannot be less than previous reading.',
+                'current_reading' => 'Current reading must be greater than previous reading.',
             ]);
         }
 
-        if (Carbon::parse($data['due_date'])->lt(Carbon::parse($data['billing_date']))) {
+        $billingDate = Carbon::parse($data['billing_date']);
+        $dueDate = Carbon::parse($data['due_date']);
+        $expectedDueDate = $billingDate->copy()->addMonthNoOverflow();
+
+        if (! $dueDate->isSameDay($expectedDueDate)) {
             throw ValidationException::withMessages([
-                'due_date' => 'The due date must be on or after the billing date.',
+                'due_date' => 'The due date must be exactly one month after the billing date.',
             ]);
         }
 
@@ -128,15 +140,9 @@ class WaterBillService
             2
         );
 
-        $penalty = 0;
-
-        // Example policy: 5% penalty on overdue unpaid bills.
-        if (
-            $data['status'] === 'unpaid'
-            && $data['due_date'] < now()->toDateString()
-        ) {
-            $penalty = round($waterCharge * 0.05, 2);
-        }
+        $penalty = $data['status'] === 'unpaid'
+            ? WaterBill::calculateLatePenalty($waterCharge, $data['due_date'])
+            : 0;
 
         $data['consumption_cu_m'] = $consumption;
         $data['penalty_fee'] = $penalty;
@@ -152,6 +158,8 @@ class WaterBillService
         return DB::transaction(function () use ($data) {
             $data['status'] = 'unpaid';
             $data = $this->calculate($data);
+            $consumer = $this->lockConsumerForMeter((int) $data['meter_id']);
+            $data = $this->applyConsumerCredit($data, $consumer);
 
             return WaterBill::create($data);
         });
@@ -167,23 +175,32 @@ class WaterBillService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($waterBill->payments()->exists()) {
+            if ($waterBill->status === 'paid' || $waterBill->payments()->exists()) {
                 throw ValidationException::withMessages([
-                    'record' => 'Cannot edit a bill with payment records.',
+                    'record' => 'Cannot edit a paid bill or a bill with payment records.',
                 ]);
             }
 
-            $data = array_merge([
+            $consumer = $this->lockConsumerForMeter((int) $waterBill->meter_id);
+            $consumer->account_credit = round(
+                (float) $consumer->account_credit + (float) $waterBill->credit_applied,
+                2
+            );
+            $consumer->save();
+
+            $data = array_merge($data, [
                 'meter_id' => $waterBill->meter_id,
                 'rate_id' => $waterBill->rate_id,
                 'previous_reading' => $waterBill->previous_reading,
-                'current_reading' => $waterBill->current_reading,
+                'current_reading' => $data['current_reading'] ?? $waterBill->current_reading,
                 'billing_date' => $waterBill->billing_date->toDateString(),
                 'due_date' => $waterBill->due_date->toDateString(),
-                'status' => $waterBill->status,
-            ], $data);
+                'status' => 'unpaid',
+            ]);
 
+            $data['credit_applied'] = 0;
             $data = $this->calculate($data);
+            $data = $this->applyConsumerCredit($data, $consumer);
 
             $waterBill->update($data);
 
@@ -199,13 +216,50 @@ class WaterBillService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($waterBill->payments()->exists()) {
+            if ($waterBill->status === 'paid' || $waterBill->payments()->exists()) {
                 throw ValidationException::withMessages([
-                    'record' => 'Cannot delete a bill with payment records.',
+                    'record' => 'Cannot delete a paid bill or a bill with payment records.',
                 ]);
             }
 
+            $consumer = $this->lockConsumerForMeter((int) $waterBill->meter_id);
+            $consumer->account_credit = round(
+                (float) $consumer->account_credit + (float) $waterBill->credit_applied,
+                2
+            );
+            $consumer->save();
+
             return (bool) $waterBill->delete();
         });
+    }
+
+    private function lockConsumerForMeter(int $meterId): Consumer
+    {
+        $meter = WaterMeter::query()
+            ->whereKey($meterId)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        return Consumer::query()
+            ->whereKey($meter->consumer_id)
+            ->lockForUpdate()
+            ->firstOrFail();
+    }
+
+    private function applyConsumerCredit(array $data, Consumer $consumer): array
+    {
+        $billTotal = round((float) $data['total_water_bill'], 2);
+        $availableCredit = max(0, (float) $consumer->account_credit);
+        $creditApplied = round(min($billTotal, $availableCredit), 2);
+
+        $consumer->account_credit = round($availableCredit - $creditApplied, 2);
+        $consumer->save();
+
+        $data['credit_applied'] = $creditApplied;
+        if ($creditApplied >= $billTotal) {
+            $data['status'] = 'paid';
+        }
+
+        return $data;
     }
 }

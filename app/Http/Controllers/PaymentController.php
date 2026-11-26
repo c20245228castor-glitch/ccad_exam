@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ConsumerPaymentRequest;
 use App\Http\Requests\PaymentRequest;
 use App\Services\PaymentService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -52,5 +54,12 @@ class PaymentController extends Controller
         $this->paymentService->delete($this->paymentService->findOrFail($id));
 
         return back()->with('success', 'Payment deleted successfully.');
+    }
+
+    public function payForConsumer(int $billId, ConsumerPaymentRequest $request): RedirectResponse
+    {
+        $this->paymentService->payForConsumer($request->user(), $billId, $request->validated());
+
+        return to_route('dashboard')->with('success', 'Payment recorded successfully.');
     }
 }

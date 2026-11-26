@@ -8,6 +8,8 @@ type Consumer = {
     account_number: string;
     consumer_name: string;
     consumer_address: string;
+    account_credit: string | number;
+    user?: { email: string } | null;
 };
 
 type PageLink = {
@@ -45,6 +47,9 @@ export default function ConsumerIndex({
     const form = useForm({
         consumer_name: '',
         consumer_address: '',
+        email: '',
+        password: '',
+        password_confirmation: '',
     });
 
     const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -57,6 +62,7 @@ export default function ConsumerIndex({
                 form.reset();
             },
             onError: (errors: Record<string, string>) => setRecordError(errors.record),
+            onFinish: () => form.reset('password', 'password_confirmation'),
         };
 
         if (editingId) {
@@ -73,6 +79,9 @@ export default function ConsumerIndex({
         form.setData({
             consumer_name: consumer.consumer_name,
             consumer_address: consumer.consumer_address,
+            email: '',
+            password: '',
+            password_confirmation: '',
         });
         setEditingId(consumer.consumer_id);
     };
@@ -125,9 +134,9 @@ export default function ConsumerIndex({
                     </div>
                 </header>
 
-                <form onSubmit={submit} className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
-                    <h2 className="font-medium md:col-span-4">{editingId ? 'Edit consumer' : 'Add consumer'}</h2>
-                    <p className="text-muted-foreground text-sm md:col-span-4">
+                <form onSubmit={submit} className="grid gap-3 rounded-md border p-4 md:grid-cols-3">
+                    <h2 className="font-medium md:col-span-3">{editingId ? 'Edit consumer' : 'Add consumer'}</h2>
+                    <p className="text-muted-foreground text-sm md:col-span-3">
                         {editingAccountNumber
                             ? `Account number: ${editingAccountNumber} (automatically assigned)`
                             : 'An account number will be assigned automatically after saving.'}
@@ -158,6 +167,57 @@ export default function ConsumerIndex({
                         />
                         {form.errors.consumer_address && <p className="mt-1 text-sm text-red-600">{form.errors.consumer_address}</p>}
                     </div>
+                    {!editingId && (
+                        <>
+                            <div>
+                                <label className="mb-1 block text-sm" htmlFor="consumer-email">
+                                    Gmail / email address
+                                </label>
+                                <input
+                                    id="consumer-email"
+                                    autoComplete="email"
+                                    className="bg-background h-9 w-full rounded-md border px-3 text-sm"
+                                    type="email"
+                                    value={form.data.email}
+                                    onChange={(event) => form.setData('email', event.target.value)}
+                                    required
+                                />
+                                {form.errors.email && <p className="mt-1 text-sm text-red-600">{form.errors.email}</p>}
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-sm" htmlFor="consumer-password">
+                                    Login password
+                                </label>
+                                <input
+                                    id="consumer-password"
+                                    autoComplete="new-password"
+                                    className="bg-background h-9 w-full rounded-md border px-3 text-sm"
+                                    type="password"
+                                    value={form.data.password}
+                                    onChange={(event) => form.setData('password', event.target.value)}
+                                    required
+                                />
+                                {form.errors.password && <p className="mt-1 text-sm text-red-600">{form.errors.password}</p>}
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-sm" htmlFor="consumer-password-confirmation">
+                                    Confirm password
+                                </label>
+                                <input
+                                    id="consumer-password-confirmation"
+                                    autoComplete="new-password"
+                                    className="bg-background h-9 w-full rounded-md border px-3 text-sm"
+                                    type="password"
+                                    value={form.data.password_confirmation}
+                                    onChange={(event) => form.setData('password_confirmation', event.target.value)}
+                                    required
+                                />
+                                {form.errors.password_confirmation && (
+                                    <p className="mt-1 text-sm text-red-600">{form.errors.password_confirmation}</p>
+                                )}
+                            </div>
+                        </>
+                    )}
                     <div className="flex items-end gap-2">
                         <button
                             className="bg-primary text-primary-foreground h-9 rounded-md px-3 text-sm font-medium"
@@ -172,7 +232,7 @@ export default function ConsumerIndex({
                             </button>
                         )}
                     </div>
-                    {recordError && <p className="text-sm text-red-600 md:col-span-4">{recordError}</p>}
+                    {recordError && <p className="text-sm text-red-600 md:col-span-3">{recordError}</p>}
                 </form>
 
                 <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -190,6 +250,8 @@ export default function ConsumerIndex({
                             <tr>
                                 <th className="px-4 py-3 font-medium">Account</th>
                                 <th className="px-4 py-3 font-medium">Consumer</th>
+                                <th className="px-4 py-3 font-medium">Login email</th>
+                                <th className="px-4 py-3 text-right font-medium">Credit</th>
                                 <th className="px-4 py-3 font-medium">Address</th>
                                 <th className="px-4 py-3 font-medium">Actions</th>
                             </tr>
@@ -199,6 +261,8 @@ export default function ConsumerIndex({
                                 <tr key={consumer.consumer_id}>
                                     <td className="px-4 py-3 font-medium">{consumer.account_number}</td>
                                     <td className="px-4 py-3">{consumer.consumer_name}</td>
+                                    <td className="px-4 py-3">{consumer.user?.email ?? 'No login account'}</td>
+                                    <td className="px-4 py-3 text-right">{Number(consumer.account_credit).toFixed(2)}</td>
                                     <td className="px-4 py-3">{consumer.consumer_address}</td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-2">
@@ -224,7 +288,7 @@ export default function ConsumerIndex({
                             ))}
                             {consumers.data.length === 0 && (
                                 <tr>
-                                    <td className="text-muted-foreground px-4 py-8 text-center" colSpan={4}>
+                                    <td className="text-muted-foreground px-4 py-8 text-center" colSpan={6}>
                                         No consumers found.
                                     </td>
                                 </tr>
